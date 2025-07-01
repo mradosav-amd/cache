@@ -54,42 +54,41 @@ enum class sample_type : uint32_t { track = 1, process, fragmented_space = 0xFFF
 
 class storage {
 public:
-  void execute_flush() {
-    auto head = m_head.load();
-    auto tail = m_tail.load();
-
-    std::filesystem::path path{filename};
-    std::ofstream ofs(path, std::ios::binary | std::ios::app);
-    if (head == tail) {
-      return;
-    }
-
-    if (!ofs) {
-      std::cerr << "Error opening file for writing: " << path << std::endl;
-      return;
-    }
-
-    if (head > tail) {
-      ofs.write(reinterpret_cast<const char *>(m_buffer->data() + tail),
-                head - tail);
-    } else {
-      ofs.write(reinterpret_cast<const char *>(m_buffer->data() + tail),
-                buffer_size - tail);
-      ofs.write(reinterpret_cast<const char *>(m_buffer->data()), head);
-    }
-    ofs.close();
-    m_tail.store(head);
-  }
-
   storage()
       : m_flushing_thread(std::thread([this]() {
+          std::filesystem::path path{filename};
+          std::ofstream ofs(path, std::ios::binary);
+          if (!ofs) {
+            std::cerr << "Error opening file for writing: " << path
+                      << std::endl;
+            return;
+          }
+          auto execute_flush = [&](std::ofstream &ofs) {
+            auto head = m_head.load();
+            auto tail = m_tail.load();
+
+            if (head == tail) {
+              return;
+            }
+
+            if (head > tail) {
+              ofs.write(reinterpret_cast<const char *>(m_buffer->data() + tail),
+                        head - tail);
+            } else {
+              ofs.write(reinterpret_cast<const char *>(m_buffer->data() + tail),
+                        buffer_size - tail);
+              ofs.write(reinterpret_cast<const char *>(m_buffer->data()), head);
+            }
+            m_tail.store(head, std::memory_order_acq_rel);
+          };
 
           while (m_do_flushing) {
-            execute_flush();
+            execute_flush(ofs);
             std::this_thread::sleep_for(std::chrono::microseconds(1));
           }
 
-          execute_flush();
+          execute_flush(ofs);
+          ofs.close();
         })) {}
 
   void set_do_flushing(const bool& value)
@@ -108,19 +107,14 @@ public:
     auto store_value = [&](const auto &val) {
       using Type = decltype(val);
       size_t len = 0;
+      auto dest = reserved_memory + position;
       if constexpr (std::is_same_v<std::decay_t<Type>, const char *>) {
         len = strlen(val) + 1;
-        auto dest = reserved_memory + position;
         std::memcpy(dest, val, len);
-        //TODO: Specialization for sample_type, not any enum
-      } else if constexpr (std::is_enum_v<std::remove_reference_t<Type>>) {
-        len = sizeof(val);
-        auto dest = reserved_memory + position;
-        *reinterpret_cast<sample_type *>(dest) = val;
       } else {
-        len = sizeof(val);
-        auto dest = reserved_memory + position;
-        *dest = val;
+        using ClearType = std::remove_const_t<std::remove_reference_t<decltype(val)>>;
+        len = sizeof(ClearType);
+        *reinterpret_cast<ClearType*>(dest) = val;
       }
       position += len;
     };
@@ -142,15 +136,11 @@ private:
       if (*reinterpret_cast<sample_type *>(data + head) !=
           sample_type::fragmented_space) {
 
-        print_buffer();
         *reinterpret_cast<sample_type *>(data + head) =
             sample_type::fragmented_space;
 
-        *(data + head + sizeof(sample_type)) =
-            buffer_size - (head + sizeof(sample_type) + 1);
-
-
-        print_buffer();
+        size_t remining_bytes = buffer_size - (head + sizeof(sample_type) + 1);
+        *reinterpret_cast<size_t*>(data + head + sizeof(sample_type)) = remining_bytes;
 
         std::cout << "fragmenting memory head at "
                   << m_head.load(std::memory_order_relaxed) << " / buffer size "
@@ -190,18 +180,6 @@ private:
     return total_size;
   }
 
-  void print_buffer()
-  {
-    std::ios_base::fmtflags f( std::cout.flags() );  // save flags state
-
-    for(auto byte : *m_buffer)
-    {
-      std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)byte << " ";
-    }
-    std::cout << std::endl;
-    std::cout.flags(f);
-  }
-
 private:
   std::thread m_flushing_thread;
   std::unique_ptr<BufferArray> m_buffer { std::make_unique<BufferArray>() };
@@ -210,10 +188,6 @@ private:
   std::mutex m_fragment_mutex;
   bool m_do_flushing { true };
 };
-
-
-
-
 
 class storage_parser
 {
@@ -365,7 +339,7 @@ int main() {
   // rps_bencmark::show_results();
 
   cache::storage buffered_storage;
-  size_t node_id = 0;
+  size_t node_id = 14;
   auto process_id = 1;
   auto thread_id = 2;
   size_t count = 0;
@@ -373,7 +347,6 @@ int main() {
   {
     cache::store_track(buffered_storage, "GPU 1", node_id++, process_id++, thread_id++, "{}");
     count++;
-    std::this_thread::sleep_for(std::chrono::seconds(1));
   }
   buffered_storage.set_do_flushing(false);
 
