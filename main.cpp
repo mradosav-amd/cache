@@ -42,28 +42,30 @@ namespace cache {
 
 constexpr auto KByte = 1024;
 constexpr auto MByte = 1024 * 1024;
-// constexpr auto buffer_size = 200 * KByte;
-constexpr auto buffer_size = 100;
-
+constexpr auto buffer_size = 10 * KByte;
+// constexpr auto buffer_size = 150;
 constexpr auto filename = "buffered_storage.bin";
 
 using BufferArray = std::array<uint8_t, buffer_size>;
 
 enum class sample_type : uint32_t { track = 1, process, fragmented_space = 0xFFFF };
 
+constexpr auto minimal_fragmented_memory_size = sizeof(sample_type) + sizeof(size_t);
 
 class storage {
 public:
   storage()
       : m_flushing_thread(std::thread([this]() {
           std::filesystem::path path{filename};
-          std::ofstream ofs(path, std::ios::binary);
+          std::ofstream ofs(path, std::ios::binary | std::ios::out);
+
           if (!ofs) {
             std::cerr << "Error opening file for writing: " << path
                       << std::endl;
             return;
           }
-          auto execute_flush = [&](std::ofstream &ofs) {
+
+          auto execute_flush = [&](std::ofstream &ofs, bool force = false) {
             auto head = m_head.load();
             auto tail = m_tail.load();
 
@@ -72,14 +74,31 @@ public:
             }
 
             if (head > tail) {
+              // std::cout << "HEAD > TAIL : tail: " << tail << " :: count " << head - tail << std::endl;
+
+              if(!force && head - tail < 5 * KByte)
+              {
+                return;
+              }
+
               ofs.write(reinterpret_cast<const char *>(m_buffer->data() + tail),
                         head - tail);
             } else {
+
+              if(!force && buffer_size - tail + head < 5 * KByte )
+              {
+                return;
+              }
+
+              // std::cout << "HEAD < TAIL : tail: " << tail << " :: count " << buffer_size - tail << std::endl;
               ofs.write(reinterpret_cast<const char *>(m_buffer->data() + tail),
                         buffer_size - tail);
+
+              // std::cout << "HEAD < TAIL : head: " << head << std::endl;
               ofs.write(reinterpret_cast<const char *>(m_buffer->data()), head);
             }
-            m_tail.store(head, std::memory_order_acq_rel);
+            // std:: cout << "------- FLUSHING --------" << std::endl;
+            m_tail.store(head);
           };
 
           while (m_do_flushing) {
@@ -87,14 +106,16 @@ public:
             std::this_thread::sleep_for(std::chrono::microseconds(1));
           }
 
-          execute_flush(ofs);
+          execute_flush(ofs, true);
           ofs.close();
         })) {}
 
   void set_do_flushing(const bool& value)
   {
     m_do_flushing = value;
+    std::cout << "--- END ---" << std::endl ;
     m_flushing_thread.join();
+    std::cout << "--- END ---" << std::endl ;
   }
 
   template <typename... T> void store(sample_type type, T &&...values) {
@@ -132,34 +153,31 @@ private:
   {
       std::lock_guard lock {m_fragment_mutex};
       auto data = m_buffer->data();
-      auto head = m_head.load(std::memory_order_relaxed);
-      if (*reinterpret_cast<sample_type *>(data + head) !=
-          sample_type::fragmented_space) {
+      auto head = m_head.load();
 
-        *reinterpret_cast<sample_type *>(data + head) =
-            sample_type::fragmented_space;
+      *reinterpret_cast<sample_type *>(data + head) =
+          sample_type::fragmented_space;
 
-        size_t remining_bytes = buffer_size - (head + sizeof(sample_type) + 1);
-        *reinterpret_cast<size_t*>(data + head + sizeof(sample_type)) = remining_bytes;
+      size_t remining_bytes = buffer_size - head - minimal_fragmented_memory_size;
 
-        std::cout << "fragmenting memory head at "
-                  << m_head.load(std::memory_order_relaxed) << " / buffer size "
-                  << buffer_size << std::endl;
-        m_head.exchange(0, std::memory_order_acq_rel);
-      }
+      *reinterpret_cast<size_t *>(data + head + sizeof(sample_type)) =
+          remining_bytes;
+
+      // std::cout << "fragmenting memory head at " << head << " / buffer size "
+      //           << buffer_size << std::endl;
+      m_head.store(0);
   }
 
   uint8_t *reserve_memory_space(size_t len) {
 
-    const auto minimal_fragmented_memory_size = sizeof(sample_type) + sizeof(size_t);
+    // std::cout << m_head.load() << " + " << len << " + " << minimal_fragmented_memory_size << " > " << buffer_size << std::endl;
 
-    auto is_fragmentation_needed = (m_head.load(std::memory_order_relaxed) + len + minimal_fragmented_memory_size) > buffer_size;
+    auto is_fragmentation_needed = (m_head.load() + len + minimal_fragmented_memory_size) > buffer_size;
     if(is_fragmentation_needed)
     {
-      // std::cout << "len:" << len << "\n";
       fragment_memory();
     }
-    auto size = m_head.fetch_add(len, std::memory_order_relaxed);
+    auto size = m_head.fetch_add(len);
     auto result = m_buffer->data() + size;
     memset(result, 0, len);
     return result;
@@ -233,7 +251,6 @@ public:
       std::vector<uint8_t> sample;
       // std::cout << "type:" << (int)type << "\n";
       // std::cout << "sample_size:" << sample_size << "\n";
-      std::cout << "ifs.tellg():" << ifs.tellg() << "\n";
       sample.reserve(sample_size);
       ifs.read(reinterpret_cast<char*>(sample.data()), sample_size);
 
@@ -339,14 +356,15 @@ int main() {
   // rps_bencmark::show_results();
 
   cache::storage buffered_storage;
-  size_t node_id = 14;
+  size_t node_id = 0;
   auto process_id = 1;
   auto thread_id = 2;
-  size_t count = 0;
-  while (count < 10)
+  int count = 0;
+  while (count < 100000)
   {
-    cache::store_track(buffered_storage, "GPU 1", node_id++, process_id++, thread_id++, "{}");
+    cache::store_track(buffered_storage, (std::string("GPU ") + std::to_string(count)).c_str(), node_id++, process_id++, thread_id++, "{}");
     count++;
+    std::this_thread::sleep_for(std::chrono::microseconds(3));
   }
   buffered_storage.set_do_flushing(false);
 
