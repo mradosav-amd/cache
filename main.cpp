@@ -282,7 +282,6 @@ public:
     ifs.close();
     return total_count;
   }
-
 };
 
 void store_track(storage& buffered_storage, const char *track_name, size_t node_id, size_t process_id,
@@ -304,9 +303,12 @@ int main() {
 
   rps_bencmark::init_from_env();
 
+  const auto number_of_iterations = 10000000;
   cache::storage buffered_storage;
-  auto thread1 = std::thread([&]() {
-    std::cout << "started thread 1" << std::endl;
+
+  std::vector<std::thread> threads;
+
+  threads.push_back(std::thread([&]() {
 
     auto node_id = 0;
     auto process_id = 1;
@@ -317,15 +319,11 @@ int main() {
       cache::store_track(buffered_storage, "GPU 1", node_id++, process_id++, thread_id++, "{}");
       rps_bencmark::end<benchmark::category::WriteTrack>();
       count++;
-
-      // std::this_thread::sleep_for(std::chrono::microseconds(3));
     }
-    while(count != 10000000);
-    std::cout << "ended thread 1" << std::endl;
-  });
+    while(count != number_of_iterations);
+  }));
 
-  auto thread2 = std::thread([&]() {
-    std::cout << "started thread 2" << std::endl;
+  threads.push_back(std::thread([&]() {
     auto node_id = 0;
 
     auto parent_process_id = 1;
@@ -343,24 +341,21 @@ int main() {
                            "{AAAAAAAAAAAAAAAAAA}");
                            count++;
       rps_bencmark::end<benchmark::category::WriteProcess>();
-      // std::this_thread::sleep_for(std::chrono::microseconds(4));
     }
-    while(count != 10000000);
-    std::cout << "ended thread 2" << std::endl;
-  });
+    while(count != number_of_iterations);
+  }));
 
-  thread1.join();
-  thread2.join();
+  for(auto& thread : threads) {
+    thread.join();
+  }
 
   buffered_storage.shutdown();
 
-  std::cout << "Writing done" << std::endl;
+  std::cout << "Writing to cache is done. Validating cache.." << std::endl;
 
   auto read_count = cache::storage_parser::load({ cache::filename });
-
-  auto expected_count = 20000000;
-
-  std::cout << (read_count != expected_count ? "FAILED" : "SUCCESS") << std::endl;
+  auto expected_count = threads.size() * number_of_iterations;
+  std::cout << (read_count != expected_count ? "Validation failed." : "Validation successful.") << std::endl;
 
   rps_bencmark::show_results();
   return 0;
