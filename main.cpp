@@ -42,44 +42,7 @@ struct process_sample {
 };
 
 namespace cache {
-class spin_lock {
-private:
-  std::atomic_flag _lockFlag;
-public:
-  spin_lock() : _lockFlag{ATOMIC_FLAG_INIT} {}
-  spin_lock(const spin_lock&) = delete;
-  spin_lock& operator=(const spin_lock&) = delete;
-  spin_lock(const spin_lock&&) = delete;
-  spin_lock& operator=(const spin_lock&&) = delete;
-
-  void lock() {
-    while (_lockFlag.test_and_set(std::memory_order_acquire)) {
-    }
-  }
-
-  bool try_lock() { return !_lockFlag.test_and_set(std::memory_order_acquire); }
-
-  void unlock() { _lockFlag.clear(); }
-};
-
-class spin_lock_scope
-{
-private:
-  spin_lock& m_lock;
-public:
-  spin_lock_scope(spin_lock& spin_lock) : m_lock(spin_lock)
-  {
-    m_lock.lock();
-  }
-  ~spin_lock_scope()
-  {
-    m_lock.unlock();
-  }
-  spin_lock_scope(const spin_lock_scope&) = delete;
-  spin_lock_scope& operator=(const spin_lock_scope&) = delete;
-  spin_lock_scope(const spin_lock_scope&&) = delete;
-  spin_lock_scope& operator=(const spin_lock_scope&&) = delete;
-};
+enum class sample_type : uint32_t { track = 1, process, fragmented_space = 0xFFFF };
 
 constexpr auto KByte = 1024;
 constexpr auto MByte = 1024 * 1024;
@@ -87,11 +50,8 @@ constexpr auto buffer_size = 10 * MByte;
 constexpr auto flush_treshhold = 5 * MByte;
 constexpr auto filename = "buffered_storage.bin";
 
-using buffer_array = std::array<uint8_t, buffer_size>;
-
-enum class sample_type : uint32_t { track = 1, process, fragmented_space = 0xFFFF };
-
 constexpr auto minimal_fragmented_memory_size = sizeof(sample_type) + sizeof(size_t);
+using buffer_array = std::array<uint8_t, buffer_size>;
 
 class storage {
 public:
@@ -110,7 +70,7 @@ public:
           auto execute_flush = [&](std::ofstream &ofs, bool force = false) {
             size_t head,tail;
             {
-              spin_lock_scope scope{m_spinlock};
+              std::lock_guard guard{m_mutex};
               head = m_head;
               tail = m_tail;
 
@@ -137,20 +97,16 @@ public:
             }
           };
 
-          while (m_do_flushing) {
+          while (!m_shutdown) {
             execute_flush(ofs);
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
           }
 
           execute_flush(ofs, true);
           ofs.close();
-        })) {}
+        }
+      )) {}
 
-  void set_do_flushing(const bool& value)
-  {
-    m_do_flushing = value;
-    m_flushing_thread.join();
-  }
 
   template <typename... T> void store(sample_type type, T &&...values)
   {
@@ -180,24 +136,24 @@ public:
     (store_value(values), ...);
   }
 
+  void shutdown()
+  {
+    m_shutdown = false;
+    m_flushing_thread.join();
+  }
 
 private:
 
   void fragment_memory()
   {
       auto data = m_buffer->data();
-
       memset(data + m_head, 0xFFFF, buffer_size - m_head);
-
       *reinterpret_cast<sample_type *>(data + m_head) =
           sample_type::fragmented_space;
 
       size_t remining_bytes = buffer_size - m_head - minimal_fragmented_memory_size;
-
       *reinterpret_cast<size_t *>(data + m_head + sizeof(sample_type)) =
           remining_bytes;
-
-      // std::cout << "fragmenting memory head at " << m_head << " / buffer size " << buffer_size << std::endl;
       m_head = 0;
   }
 
@@ -206,7 +162,7 @@ private:
   {
     size_t size;
     {
-      spin_lock_scope scope{m_spinlock};
+      std::lock_guard scope{ m_mutex };
 
       if ((m_head + len + minimal_fragmented_memory_size) > buffer_size) {
         fragment_memory();
@@ -237,8 +193,8 @@ private:
   }
 
 private:
-  spin_lock m_spinlock;
-  bool m_do_flushing { true };
+  std::mutex m_mutex;
+  bool m_shutdown { true };
   std::thread m_flushing_thread;
   size_t m_head{0};
   size_t m_tail{0};
@@ -292,9 +248,6 @@ public:
       }
 
       std::vector<uint8_t> sample;
-      // std::cout << "type:" << (int)type << "\n";
-      // std::cout << "sample_size:" << sample_size << "\n";
-      // std::cout << "ifs.tellg():" << ifs.tellg() << "\n";
       sample.reserve(sample_size);
       ifs.read(reinterpret_cast<char*>(sample.data()), sample_size);
 
@@ -307,11 +260,8 @@ public:
         if(data.node_id == track_count++) {
           total_count++;
         }
-
-        // std::cout << data.track_name << " " << data.node_id << " "
-        //           << data.process_id << " " << data.thread_id << " "
-        //           << data.extdata << std::endl;
-      } break;
+        break;
+      }
       case sample_type::process: {
         process_sample data;
         parse_data(sample.data(), data.guid, data.node_id,
@@ -322,11 +272,7 @@ public:
           total_count++;
         }
 
-        // std::cout << data.guid << " " << data.node_id << " "
-        //           << data.parent_process_id << " " << data.process_id << " "
-        //           << data.init << " " << data.fini << " " << data.start << " "
-        //           << data.end << " " << data.command << " " << data.env << " "
-        //           << data.extdata << std::endl;
+        break;
       }
       default:
         break;
@@ -334,7 +280,6 @@ public:
     }
 
     ifs.close();
-    std::cout << "Total entries" << total_count << std::endl;
     return total_count;
   }
 
@@ -407,7 +352,7 @@ int main() {
   thread1.join();
   thread2.join();
 
-  buffered_storage.set_do_flushing(false);
+  buffered_storage.shutdown();
 
   std::cout << "Writing done" << std::endl;
 
