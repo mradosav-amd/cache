@@ -59,7 +59,6 @@ public:
       : m_flushing_thread(std::thread([this]() {
           std::filesystem::path path{filename};
           std::ofstream ofs(path, std::ios::binary | std::ios::out);
-          std::mutex flushing_mutex;
 
           if (!ofs) {
             std::cerr << "Error opening file for writing: " << path
