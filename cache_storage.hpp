@@ -81,7 +81,6 @@ public:
               tail = m_tail;
 
               if (head == tail) {
-                std::cout << "FAILED 1" << std::endl;
                 return;
               }
 
@@ -89,7 +88,6 @@ public:
                                     ? (m_head - m_tail)
                                     : (buffer_size - m_tail + m_head);
               if (!force && used_space < flush_treshhold) {
-                std::cout << "FAILED" << std::endl;
                 return;
               }
               m_tail = m_head;
@@ -115,7 +113,6 @@ public:
           }
 
           execute_flush(ofs, true);
-          std::cout << "FLUSHING" << std::endl;
           ofs.close();
         }
       )) {}
