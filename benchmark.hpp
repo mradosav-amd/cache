@@ -199,6 +199,8 @@ namespace benchmark
         {
         case CategoryEnum::WriteTrack: return "WriteTrack";
         case CategoryEnum::WriteProcess: return "WriteProcess";
+        case CategoryEnum::WritePmcEvent1: return "WritePmcEvent1";
+        case CategoryEnum::WritePmcEvent2: return "WritePmcEvent2";
         default: return "Unknown";
         }
     }
@@ -217,10 +219,12 @@ namespace benchmark
   {
     WriteTrack,
     WriteProcess,
+    WritePmcEvent1,
+    WritePmcEvent2,
     Count
   };
 
 } // namespace benchmark
 
 using rps_bencmark = benchmark::benchmark_impl<
-  true, benchmark::category, benchmark::category::WriteTrack, benchmark::category::WriteProcess>;
+  true, benchmark::category, benchmark::category::WriteTrack, benchmark::category::WriteProcess, benchmark::category::WritePmcEvent1, benchmark::category::WritePmcEvent2>;

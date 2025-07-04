@@ -21,6 +21,10 @@
 #include <condition_variable>
 #include "metadata.hpp"
 
+#define RESET   "\033[0m"
+#define BLUE    "\033[34m"      /* Blue */
+#define MAGENTA "\033[35m"      /* Magenta */
+
 struct track_sample {
   std::string track_name;
   size_t node_id;
@@ -50,6 +54,15 @@ struct pmc_event{
 
 namespace cache {
 enum class sample_type : uint32_t { track = 1, process, pmc_event, fragmented_space = 0xFFFF };
+
+enum class metadata_type { pmc_info };
+
+template<typename ValueType>
+struct metadata_key
+{
+  metadata_type m_type;
+  ValueType m_value;
+};
 
 constexpr auto KByte = 1024;
 constexpr auto MByte = 1024 * 1024;
@@ -118,7 +131,8 @@ public:
       )) {}
 
 
-  template <typename... T> void store(sample_type type, T &&...values)
+  template <typename... T>
+  void store(sample_type type, T &&...values)
   {
     auto arg_size = get_size(values...);
     size_t total_size = arg_size + sizeof(type) + sizeof(size_t);
@@ -374,7 +388,7 @@ public:
         auto process = metadata_storage.get_current_process();
         auto node = metadata_storage.get_current_node();
 
-        std::cout << pmc_info->unique_name << " value: " << data.value << " " << pmc_info->unit << " for agent: " << agent->type << std::endl;
+        std::cout << ((agent->type == "CPU") ? BLUE : MAGENTA) << pmc_info->unique_name << " value: " << data.value << " " << pmc_info->unit << " for agent: " << agent->type << RESET << std::endl;
 
         break;
       }
@@ -404,7 +418,7 @@ void store_process(storage& buffered_storage, std::string guid, size_t node_id, 
 
 void store_pmc_event(storage& buffered_storage, const char* pmc_info_name, uint32_t value)
 {
-  buffered_storage.store(sample_type::pmc_event, pmc_info_name, value);
+  buffered_storage.store(sample_type::pmc_event, pmc_info_name, value>);
 }
 
 } // namespace cache

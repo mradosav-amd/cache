@@ -14,7 +14,7 @@
 #include <vector>
 #include <set>
 #include <algorithm>
-
+#include <functional>
 
 template<typename T>
 class synced_set
@@ -26,10 +26,16 @@ public:
        m_set.emplace(value);
     }
 
-    // TODO: do it cleaner
-    std::set<T>& get_set()
+    std::optional<T> find(std::function<bool(const T&)> predicate)
     {
-        return m_set;
+       std::lock_guard guard{m_mutex};
+        auto it = std::find_if(
+        m_set.begin(), m_set.end(), predicate);
+        if(it == m_set.end())
+        {
+            return std::nullopt;
+        }
+        return *it;
     }
 
 private:
@@ -73,7 +79,6 @@ struct pmc_info
         return lhs.unique_name.compare(rhs.unique_name);
     }
 };
-
 
 // struct thread_info
 // {
@@ -131,18 +136,9 @@ struct storage {
 
     std::optional<pmc_info> get_pmc_info(const std::string_view& unique_name)
     {
-        auto set = m_pmc_infos.get_set();
-
-        auto it = std::find_if(
-            set.begin(), set.end(),
-            [&](const metadata::pmc_info &value) {
+        return m_pmc_infos.find([&](const metadata::pmc_info &value) {
               return value.unique_name.compare(unique_name) == 0;
             });
-        if(it == set.end())
-        {
-          return std::nullopt;
-        }
-        return *it;
     }
 private:
     node_info m_current_node;

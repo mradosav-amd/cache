@@ -120,7 +120,6 @@ void run_metadata_example()
     auto thread_id = 2;
     auto count = 0;
     while(count != number_of_iterations) {
-      // std::cout << "track" << std::endl;
       std::string name = "PLACEHOLDER TEXT" + std::to_string(count);
       rps_bencmark::start<benchmark::category::WriteTrack>();
       cache::store_track(buffered_storage, name.c_str(), node_id++, process_id++, thread_id++, "{}");
@@ -133,12 +132,11 @@ void run_metadata_example()
   threads.push_back(std::thread([&]() {
     auto count = 0;
     do {
-      // rps_bencmark::start<benchmark::category::WriteProcess>();
+      rps_bencmark::start<benchmark::category::WritePmcEvent1>();
 
-      // std::cout << "gpu event 1" << std::endl;
       cache::store_pmc_event(buffered_storage, "gpu_temp", (count % 10) + 50);
 
-      // rps_bencmark::end<benchmark::category::WriteProcess>();
+      rps_bencmark::end<benchmark::category::WritePmcEvent1>();
       count++;
     }
     while(count != number_of_iterations );
@@ -147,12 +145,11 @@ void run_metadata_example()
   threads.push_back(std::thread([&]() {
     auto count = 0;
     do {
-      // rps_bencmark::start<benchmark::category::WriteProcess>();
+      rps_bencmark::start<benchmark::category::WritePmcEvent2>();
 
-      // std::cout << "cpu event 2" << std::endl;
       cache::store_pmc_event(buffered_storage, "cpu_busy", count % 100);
 
-      // rps_bencmark::end<benchmark::category::WriteProcess>();
+      rps_bencmark::end<benchmark::category::WritePmcEvent2>();
       count++;
     }
     while(count != number_of_iterations );
