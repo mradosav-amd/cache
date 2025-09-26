@@ -26,27 +26,6 @@
 
 using postprocessing_callback = std::function<void(const cacheable_t&)>;
 
-namespace
-{
-struct type_callback_invocator
-{
-    explicit type_callback_invocator(const std::vector<postprocessing_callback>& list)
-    : m_callback_list(list)
-    {}
-
-    void operator()(const cacheable_t& obj)
-    {
-        for(auto& cb : m_callback_list)
-        {
-            cb(obj);
-        }
-    }
-
-private:
-    std::vector<postprocessing_callback> m_callback_list;
-};
-}  // namespace
-
 template <typename... SupportedTypes>
 class storage_parser
 {
@@ -55,10 +34,15 @@ public:
     : m_filename(std::move(_filename))
     {}
 
-    void register_type_callback(const type_identifier_t&                       type,
-                                const std::function<void(const cacheable_t&)>& callback)
+    template <typename Type>
+    void register_type_callback(const std::function<void(const cacheable_t&)>& callback)
     {
-        m_callbacks[type].push_back(callback);
+        static_assert(has_type_identifier<Type>::value,
+                      "Provided type don't have type identifier .");
+        static_assert(has_deserialize<Type>::value,
+                      "Provided type don't have deserialize function.");
+
+        m_callbacks[Type::type_identifier] = callback;
     }
 
     void register_on_finished_callback(std::unique_ptr<std::function<void()>> callback)
@@ -86,15 +70,6 @@ public:
             type_identifier_t type;
             size_t            sample_size;
         };
-
-        std::map<type_identifier_t, std::shared_ptr<type_callback_invocator>> _invocators;
-
-        for(const auto& callback_pair : m_callbacks)
-        {
-            auto invocator =
-                std::make_shared<type_callback_invocator>(callback_pair.second);
-            _invocators[callback_pair.first] = invocator;
-        }
 
         sample_header header;
 
@@ -125,7 +100,8 @@ public:
             auto sample_value = m_registry.get_type(header.type, data);
             if(sample_value.has_value())
             {
-                std::visit(*_invocators[header.type], sample_value.value());
+                std::visit([&](auto& value) { invoke_callbacks(header.type, value); },
+                           sample_value.value());
             }
             else
             {

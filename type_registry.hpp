@@ -12,7 +12,7 @@ public:
     using variant_t = std::variant<Types...>;
 
 public:
-    type_registry() { (register_type<Types>(), ...); }
+    type_registry() {}
 
     std::optional<variant_t> get_type(type_identifier_t id, uint8_t*& data)
     {
@@ -36,7 +36,7 @@ private:
     template <typename T>
     void register_type()
     {
-        static_assert(has_type_id<T>::value, "Type must have type_identifier");
+        static_assert(has_type_identifier<T>::value, "Type must have type_identifier");
         deserializers[T::type_identifier] = [](uint8_t*& data) -> variant_t {
             return deserialize<T>(data);
         };

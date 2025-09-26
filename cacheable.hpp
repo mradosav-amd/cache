@@ -109,11 +109,11 @@ struct has_get_size<T, void_t<decltype(get_size(std::declval<const T&>()))>>
 {};
 
 template <class T, class = void>
-struct has_type_id : std::false_type
+struct has_type_identifier : std::false_type
 {};
 
 template <class T>
-struct has_type_id<T, void_t<decltype(T::type_identifier)>>
+struct has_type_identifier<T, void_t<decltype(T::type_identifier)>>
 : std::bool_constant<
       std::is_convertible_v<decltype(T::type_identifier), type_identifier_t>>
 {};
@@ -125,7 +125,7 @@ check_type()
     static_assert(has_serialize<Tp>::value, "Type don't have `serialize` function.");
     static_assert(has_deserialize<Tp>::value, "Type don't have `deserialize` function.");
     static_assert(has_get_size<Tp>::value, "Type don't have `get_size` function.");
-    static_assert(has_type_id<Tp>::value,
+    static_assert(has_type_identifier<Tp>::value,
                   "Type don't have `type_identifier` member of type type_identifier_t.");
 }
 

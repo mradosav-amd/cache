@@ -18,78 +18,132 @@
 
 #include "cacheable.hpp"
 
+struct cache_buffer_t
+{
+    std::mutex                      mutex;
+    size_t                          head{ 0 };
+    size_t                          tail{ 0 };
+    std::unique_ptr<buffer_array_t> array{ std::make_unique<buffer_array_t>() };
+};
+using cache_buffer_ptr_t = std::shared_ptr<cache_buffer_t>;
+
+struct worker_synchronization_t
+{
+    std::condition_variable is_running_condition;
+    bool                    is_running{ true };
+
+    std::condition_variable exit_finished_condition;
+    bool                    exit_finished{ false };
+};
+using worker_synchronization_ptr_t = std::shared_ptr<worker_synchronization_t>;
+
 struct flush_worker
 {
-    void execute() { std::cout << "test" << std::endl; }
+    explicit flush_worker(cache_buffer_ptr_t           cache_buffer_ptr,
+                          worker_synchronization_ptr_t worker_synchronization_ptr)
+    : m_buffer_ptr(std::move(cache_buffer_ptr))
+    , m_worker_synchronization(std::move(worker_synchronization_ptr))
+    {}
+
+    void execute_flush(std::ofstream& ofs, bool force = false)
+    {
+        size_t _head, _tail;
+        {
+            std::lock_guard guard{ m_buffer_ptr->mutex };
+            _head = m_buffer_ptr->head;
+            _tail = m_buffer_ptr->tail;
+
+            if(_head == _tail)
+            {
+                return;
+            }
+
+            auto used_space =
+                m_buffer_ptr->head > m_buffer_ptr->tail
+                    ? (m_buffer_ptr->head - m_buffer_ptr->tail)
+                    : (buffer_size - m_buffer_ptr->tail + m_buffer_ptr->head);
+            if(!force && used_space < flush_threshold)
+            {
+                return;
+            }
+            m_buffer_ptr->tail = m_buffer_ptr->head;
+        }
+
+        if(_head > _tail)
+        {
+            ofs.write(reinterpret_cast<const char*>(m_buffer_ptr->array->data() + _tail),
+                      _head - _tail);
+        }
+        else
+        {
+            ofs.write(reinterpret_cast<const char*>(m_buffer_ptr->array->data() + _tail),
+                      buffer_size - _tail);
+            ofs.write(reinterpret_cast<const char*>(m_buffer_ptr->array->data()), _head);
+        }
+    };
+
+    void operator()()
+    {
+        auto          filepath = get_buffered_storage_filename(0, 0);
+        std::ofstream _ofs(filepath, std::ios::binary | std::ios::out);
+
+        if(!_ofs)
+        {
+            std::stringstream _ss;
+            _ss << "Error opening file for writing: " << filepath;
+            throw std::runtime_error(_ss.str());
+        }
+
+        std::mutex _shutdown_condition_mutex;
+        while(m_worker_synchronization->is_running)
+        {
+            execute_flush(_ofs);
+            std::unique_lock _lock{ _shutdown_condition_mutex };
+            m_worker_synchronization->is_running_condition.wait_for(
+                _lock, std::chrono::milliseconds(CACHE_FILE_FLUSH_TIMEOUT),
+                [&]() { return !m_worker_synchronization->is_running; });
+        }
+
+        execute_flush(_ofs, true);
+        _ofs.close();
+        m_worker_synchronization->exit_finished = true;
+        m_worker_synchronization->exit_finished_condition.notify_one();
+
+        std::cout << "thread finished" << std::endl;
+    }
+
+private:
+    cache_buffer_ptr_t           m_buffer_ptr;
+    worker_synchronization_ptr_t m_worker_synchronization;
 };
 
-struct my_worker_factory
+struct worker_factory
 {
-    flush_worker get_worker() { return {}; };
+    worker_factory()                            = delete;
+    worker_factory(worker_factory&)             = delete;
+    worker_factory& operator=(worker_factory&)  = delete;
+    worker_factory(worker_factory&&)            = delete;
+    worker_factory& operator=(worker_factory&&) = delete;
+
+    template <typename WorkerType>
+    static WorkerType get_worker(
+        const cache_buffer_ptr_t&           cache_buffer_ptr,
+        const worker_synchronization_ptr_t& worker_synchronization_ptr)
+    {
+        return WorkerType(cache_buffer_ptr, worker_synchronization_ptr);
+    };
 };
 
-template <typename worker_factory>
+template <typename WorkerType>
 class buffered_storage
 {
 public:
-    // buffered_storage()
-    //     : m_flushing_thread(std::thread([this]() {
-    //         auto filepath = get_buffered_storage_filename(0, 0);
-    //         std::ofstream _ofs(filepath, std::ios::binary | std::ios::out);
+    explicit buffered_storage()
+    : m_flushing_thread{ worker_factory::get_worker<WorkerType>(
+          m_cache_buffer_ptr, m_worker_synchronization) }
+    {}
 
-    //         if (!_ofs) {
-    //           std::stringstream _ss;
-    //           _ss << "Error opening file for writing: " << filepath;
-    //           throw std::runtime_error(_ss.str());
-    //         }
-
-    //         auto execute_flush = [&](std::ofstream &ofs, bool force = false) {
-    //           size_t _head, _tail;
-    //           {
-    //             std::lock_guard guard{m_mutex};
-    //             _head = m_head;
-    //             _tail = m_tail;
-
-    //             if (_head == _tail) {
-    //               return;
-    //             }
-
-    //             auto used_space = m_head > m_tail
-    //                                   ? (m_head - m_tail)
-    //                                   : (buffer_size - m_tail + m_head);
-    //             if (!force && used_space < flush_threshold) {
-    //               return;
-    //             }
-    //             m_tail = m_head;
-    //           }
-
-    //           if (_head > _tail) {
-    //             ofs.write(
-    //                 reinterpret_cast<const char *>(m_buffer->data() + _tail),
-    //                 _head - _tail);
-    //           } else {
-    //             ofs.write(
-    //                 reinterpret_cast<const char *>(m_buffer->data() + _tail),
-    //                 buffer_size - _tail);
-    //             ofs.write(reinterpret_cast<const char *>(m_buffer->data()),
-    //                       _head);
-    //           }
-    //         };
-
-    //         std::mutex _shutdown_condition_mutex;
-    //         while (m_running) {
-    //           execute_flush(_ofs);
-    //           std::unique_lock _lock{_shutdown_condition_mutex};
-    //           m_shutdown_condition.wait_for(
-    //               _lock, std::chrono::milliseconds(CACHE_FILE_FLUSH_TIMEOUT),
-    //               [&]() { return !m_running; });
-    //         }
-
-    //         execute_flush(_ofs, true);
-    //         _ofs.close();
-    //         m_exit_finished = true;
-    //         m_exit_condition.notify_one();
-    //       })) {}
+    ~buffered_storage() { m_flushing_thread.detach(); }
 
     template <typename Tp>
     auto store(const Tp& val)
@@ -108,110 +162,60 @@ public:
 
     void shutdown()
     {
-        // std::cout << "Buffer storage shutting down..";
-        // m_running = false;
-        // m_shutdown_condition.notify_all();
+        std::cout << "Buffer storage shutting down.." << std::endl;
+        m_worker_synchronization->is_running = false;
+        m_worker_synchronization->is_running_condition.notify_all();
 
-        // std::mutex _exit_mutex;
-        // std::unique_lock _exit_lock{_exit_mutex};
-        // m_exit_condition.wait(_exit_lock, [&]() { return m_exit_finished; });
+        std::mutex       _exit_mutex;
+        std::unique_lock _exit_lock{ _exit_mutex };
+        m_worker_synchronization->exit_finished_condition.wait(
+            _exit_lock, [&]() { return m_worker_synchronization->exit_finished; });
 
-        worker_factory f;
-        auto           worker = f.get_worker();
-        worker.execute();
-
-        auto          filepath = get_buffered_storage_filename(0, 0);
-        std::ofstream _ofs(filepath, std::ios::binary | std::ios::out);
-
-        if(!_ofs)
-        {
-            std::stringstream _ss;
-            _ss << "Error opening file for writing: " << filepath;
-            throw std::runtime_error(_ss.str());
-        }
-
-        auto execute_flush = [&](std::ofstream& ofs, bool force = false) {
-            size_t _head, _tail;
-            {
-                std::lock_guard guard{ m_mutex };
-                _head = m_head;
-                _tail = m_tail;
-
-                if(_head == _tail)
-                {
-                    return;
-                }
-
-                auto used_space =
-                    m_head > m_tail ? (m_head - m_tail) : (buffer_size - m_tail + m_head);
-                if(!force && used_space < flush_threshold)
-                {
-                    return;
-                }
-                m_tail = m_head;
-            }
-
-            if(_head > _tail)
-            {
-                ofs.write(reinterpret_cast<const char*>(m_buffer->data() + _tail),
-                          _head - _tail);
-            }
-            else
-            {
-                ofs.write(reinterpret_cast<const char*>(m_buffer->data() + _tail),
-                          buffer_size - _tail);
-                ofs.write(reinterpret_cast<const char*>(m_buffer->data()), _head);
-            }
-        };
-
-        execute_flush(_ofs, true);
+        std::cout << "shutdown finished" << std::endl;
     }
 
 private:
     void fragment_memory()
     {
-        auto* _data = m_buffer->data();
-        memset(_data + m_head, 0xFFFF, buffer_size - m_head);
-        *reinterpret_cast<type_identifier_t*>(_data + m_head) =
+        auto* _data = m_cache_buffer_ptr->array->data();
+        memset(_data + m_cache_buffer_ptr->head, 0xFFFF,
+               buffer_size - m_cache_buffer_ptr->head);
+        *reinterpret_cast<type_identifier_t*>(_data + m_cache_buffer_ptr->head) =
             type_identifier_t::fragmented_space;
 
-        size_t remaining_bytes = buffer_size - m_head - header_size;
-        *reinterpret_cast<size_t*>(_data + m_head + sizeof(type_identifier_t)) =
-            remaining_bytes;
-        m_head = 0;
+        size_t remaining_bytes = buffer_size - m_cache_buffer_ptr->head - header_size;
+        *reinterpret_cast<size_t*>(_data + m_cache_buffer_ptr->head +
+                                   sizeof(type_identifier_t)) = remaining_bytes;
+        m_cache_buffer_ptr->head                              = 0;
     }
 
     uint8_t* reserve_memory_space(size_t len)
     {
         size_t _size;
         {
-            std::lock_guard scope{ m_mutex };
+            std::lock_guard scope{ m_cache_buffer_ptr->mutex };
 
-            if((m_head + len + header_size) > buffer_size)
+            if((m_cache_buffer_ptr->head + len + header_size) > buffer_size)
             {
                 fragment_memory();
             }
-            _size  = m_head;
-            m_head = m_head + len;
+            _size                    = m_cache_buffer_ptr->head;
+            m_cache_buffer_ptr->head = m_cache_buffer_ptr->head + len;
         }
 
-        auto* _result = m_buffer->data() + _size;
+        auto* _result = m_cache_buffer_ptr->array->data() + _size;
         memset(_result, 0, len);
         return _result;
     }
 
-    bool is_running() const { return m_running; }
+    bool is_running() const { return m_worker_synchronization->is_running; }
 
 private:
-    std::mutex              m_mutex;
-    std::condition_variable m_exit_condition;
-    bool                    m_exit_finished{ false };
-    bool                    m_running{ true };
-    std::condition_variable m_shutdown_condition;
-    std::thread             m_flushing_thread;
+    worker_synchronization_ptr_t m_worker_synchronization{
+        std::make_shared<worker_synchronization_t>()
+    };
 
-    size_t                          m_head{ 0 };
-    size_t                          m_tail{ 0 };
-    std::unique_ptr<buffer_array_t> m_buffer{ std::make_unique<buffer_array_t>() };
-    pid_t                           m_created_process;
+    cache_buffer_ptr_t m_cache_buffer_ptr{ std::make_shared<cache_buffer_t>() };
+    std::thread        m_flushing_thread;
+    pid_t              m_created_process;
 };
