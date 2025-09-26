@@ -1,155 +1,122 @@
-#ifndef CACHE_STORAGE
-#define CACHE_STORAGE
-
-#include "metadata.hpp"
-#include <algorithm>
+#pragma once
 #include <array>
+#include <bits/chrono.h>
 #include <cassert>
 #include <chrono>
+#include <condition_variable>
 #include <cstdlib>
 #include <cstring>
-#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <stdint.h>
 #include <string.h>
 #include <string>
 #include <thread>
 #include <type_traits>
-#include <condition_variable>
-#include "metadata.hpp"
+#include <vector>
 
-#define RESET   "\033[0m"
-#define BLUE    "\033[34m"      /* Blue */
-#define MAGENTA "\033[35m"      /* Magenta */
+#include "cacheable.hpp"
 
-struct track_sample {
-  std::string track_name;
-  size_t node_id;
-  size_t process_id;
-  size_t thread_id;
-  std::string extdata;
+struct pmc_event {
+  std::string pmc_info_name;
+  uint32_t value;
 };
 
-struct process_sample {
-  std::string guid;
-  size_t node_id;
-  size_t parent_process_id;
-  size_t process_id;
-  size_t init;
-  size_t fini;
-  size_t start;
-  size_t end;
-  std::string command;
-  std::string env;
-  std::string extdata;
-};
-
-struct pmc_event{
-    std::string pmc_info_name;
-    uint32_t value;
-};
-
-namespace cache {
-enum class sample_type : uint32_t { track = 1, process, pmc_event, fragmented_space = 0xFFFF };
-
-enum class metadata_type { pmc_info };
-
-template<typename ValueType>
-struct metadata_key
-{
-  metadata_type m_type;
-  ValueType m_value;
-};
-
-constexpr auto KByte = 1024;
-constexpr auto MByte = 1024 * 1024;
-constexpr auto buffer_size = 10 * MByte;
-constexpr auto flush_treshhold = 5 * MByte;
-constexpr auto filename = "buffered_storage.bin";
-
-constexpr auto minimal_fragmented_memory_size = sizeof(sample_type) + sizeof(size_t);
-using buffer_array = std::array<uint8_t, buffer_size>;
-
-class storage {
+class buffered_storage {
 public:
-  storage()
+  buffered_storage()
       : m_flushing_thread(std::thread([this]() {
-          std::filesystem::path path{filename};
-          std::ofstream ofs(path, std::ios::binary | std::ios::out);
+          auto filepath = get_buffered_storage_filename(0, 0);
+          std::ofstream _ofs(filepath, std::ios::binary | std::ios::out);
 
-          if (!ofs) {
-            std::cerr << "Error opening file for writing: " << path
-                      << std::endl;
-            return;
+          if (!_ofs) {
+            std::stringstream _ss;
+            _ss << "Error opening file for writing: " << filepath;
+            throw std::runtime_error(_ss.str());
           }
 
           auto execute_flush = [&](std::ofstream &ofs, bool force = false) {
-            size_t head,tail;
+            size_t _head, _tail;
             {
               std::lock_guard guard{m_mutex};
-              head = m_head;
-              tail = m_tail;
+              _head = m_head;
+              _tail = m_tail;
 
-              if (head == tail) {
+              if (_head == _tail) {
                 return;
               }
 
               auto used_space = m_head > m_tail
                                     ? (m_head - m_tail)
                                     : (buffer_size - m_tail + m_head);
-              if (!force && used_space < flush_treshhold) {
+              if (!force && used_space < flush_threshold) {
                 return;
               }
               m_tail = m_head;
             }
 
-            if (head > tail) {
-              ofs.write(reinterpret_cast<const char *>(m_buffer->data() + tail),
-                        head - tail);
+            if (_head > _tail) {
+              ofs.write(
+                  reinterpret_cast<const char *>(m_buffer->data() + _tail),
+                  _head - _tail);
             } else {
-              ofs.write(reinterpret_cast<const char *>(m_buffer->data() + tail),
-                        buffer_size - tail);
-              ofs.write(reinterpret_cast<const char *>(m_buffer->data()), head);
+              ofs.write(
+                  reinterpret_cast<const char *>(m_buffer->data() + _tail),
+                  buffer_size - _tail);
+              ofs.write(reinterpret_cast<const char *>(m_buffer->data()),
+                        _head);
             }
           };
 
-          std::mutex shutdown_mutex;
-
-          while (!m_shutdown) {
-            execute_flush(ofs);
-            std::unique_lock lock {shutdown_mutex};
-            m_shutdown_conditional.wait_for(lock,
-                                            std::chrono::milliseconds(30), [&](){ return m_shutdown; });
+          std::mutex _shutdown_condition_mutex;
+          while (m_running) {
+            execute_flush(_ofs);
+            std::unique_lock _lock{_shutdown_condition_mutex};
+            m_shutdown_condition.wait_for(
+                _lock, std::chrono::milliseconds(CACHE_FILE_FLUSH_TIMEOUT),
+                [&]() { return !m_running; });
           }
 
-          execute_flush(ofs, true);
-          ofs.close();
-        }
-      )) {}
+          execute_flush(_ofs, true);
+          _ofs.close();
+          m_exit_finished = true;
+          m_exit_condition.notify_one();
+        })) {}
 
+  template <typename... T> void store(entry_type type, T &&...values) {
 
-  template <typename... T>
-  void store(sample_type type, T &&...values)
-  {
+    constexpr bool is_supported_type =
+        (supported_types::is_supported<T> && ...);
+    static_assert(is_supported_type,
+                  "Supported types are const char*, char*, "
+                  "unsigned long, unsigned int, long, unsigned "
+                  "char, std::vector<unsigned char>, double, and int.");
+
     auto arg_size = get_size(values...);
-    size_t total_size = arg_size + sizeof(type) + sizeof(size_t);
-    auto reserved_memory = reserve_memory_space(total_size);
+    auto total_size = arg_size + sizeof(type) + sizeof(size_t);
+    auto *reserved_memory = reserve_memory_space(total_size);
     size_t position = 0;
 
     auto store_value = [&](const auto &val) {
       using Type = decltype(val);
       size_t len = 0;
-      auto dest = reserved_memory + position;
+      auto *dest = reserved_memory + position;
       if constexpr (std::is_same_v<std::decay_t<Type>, const char *>) {
         len = strlen(val) + 1;
         std::memcpy(dest, val, len);
+      } else if constexpr (std::is_same_v<std::decay_t<Type>,
+                                          std::vector<uint8_t>>) {
+        size_t elem_count = val.size();
+        len = elem_count + sizeof(size_t);
+        std::memcpy(dest, &elem_count, sizeof(size_t));
+        std::memcpy(dest + sizeof(size_t), val.data(), val.size());
       } else {
-        using ClearType = std::remove_const_t<std::remove_reference_t<decltype(val)>>;
+        using ClearType = std::decay_t<decltype(val)>;
         len = sizeof(ClearType);
-        *reinterpret_cast<ClearType*>(dest) = val;
+        *reinterpret_cast<ClearType *>(dest) = val;
       }
       position += len;
     };
@@ -160,58 +127,80 @@ public:
     (store_value(values), ...);
   }
 
-  void shutdown()
-  {
-    m_shutdown = true;
-    m_shutdown_conditional.notify_all();
-    m_flushing_thread.join();
-  }
-
 private:
+  void shutdown() {
+    std::cout << "Buffer storage shutting down..";
+    m_running = false;
+    m_shutdown_condition.notify_all();
 
-  void fragment_memory()
-  {
-      auto data = m_buffer->data();
-      memset(data + m_head, 0xFFFF, buffer_size - m_head);
-      *reinterpret_cast<sample_type *>(data + m_head) =
-          sample_type::fragmented_space;
-
-      size_t remining_bytes = buffer_size - m_head - minimal_fragmented_memory_size;
-      *reinterpret_cast<size_t *>(data + m_head + sizeof(sample_type)) =
-          remining_bytes;
-      m_head = 0;
+    std::mutex _exit_mutex;
+    std::unique_lock _exit_lock{_exit_mutex};
+    m_exit_condition.wait(_exit_lock, [&]() { return m_exit_finished; });
   }
 
+  void fragment_memory() {
+    auto *_data = m_buffer->data();
+    memset(_data + m_head, 0xFFFF, buffer_size - m_head);
+    *reinterpret_cast<entry_type *>(_data + m_head) =
+        entry_type::fragmented_space;
 
-  uint8_t *reserve_memory_space(size_t len)
-  {
-    size_t size;
+    size_t remaining_bytes =
+        buffer_size - m_head - minimal_fragmented_memory_size;
+    *reinterpret_cast<size_t *>(_data + m_head + sizeof(entry_type)) =
+        remaining_bytes;
+    m_head = 0;
+  }
+
+  uint8_t *reserve_memory_space(size_t len) {
+    size_t _size;
     {
-      std::lock_guard scope{ m_mutex };
+      std::lock_guard scope{m_mutex};
 
       if ((m_head + len + minimal_fragmented_memory_size) > buffer_size) {
         fragment_memory();
       }
-      size = m_head;
+      _size = m_head;
       m_head = m_head + len;
     }
 
-    auto result = m_buffer->data() + size;
-    memset(result, 0, len);
-    return result;
+    auto *_result = m_buffer->data() + _size;
+    memset(_result, 0, len);
+    return _result;
+  }
+
+  bool is_running() const { return m_running; }
+
+  template <typename... Types> struct typelist {
+    template <typename T>
+    constexpr static bool is_supported =
+        (std::is_same_v<std::decay_t<T>, Types> || ...);
   };
 
-  template <typename... T> size_t get_size(T &...val)
-  {
-    auto get_size_impl = [&](auto val) {
-      using Type = decltype(val);
-      if constexpr (std::is_same_v<Type, const char *>) {
-        return strlen(val) + 1;
-      } else {
-        return sizeof(Type);
-      }
-    };
+  using supported_types =
+      typelist<const char *, char *, uint64_t, int32_t, uint32_t,
+               std::vector<uint8_t>, uint8_t, int64_t, double>;
 
+  template <typename T>
+  static constexpr bool is_string_literal_v =
+      std::is_same_v<std::decay_t<T>, const char *> ||
+      std::is_same_v<std::decay_t<T>, char *>;
+
+  template <typename T> constexpr size_t get_size_impl(T &&val) {
+    if constexpr (is_string_literal_v<T>) {
+      size_t size = 0;
+      while (val[size] != '\0') {
+        size++;
+      }
+      return ++size;
+    } else if constexpr (std::is_same_v<std::decay_t<T>,
+                                        std::vector<uint8_t>>) {
+      return val.size() + sizeof(size_t);
+    } else {
+      return sizeof(T);
+    }
+  }
+
+  template <typename... T> constexpr size_t get_size(T &&...val) {
     auto total_size = 0;
     ((total_size += get_size_impl(val)), ...);
     return total_size;
@@ -219,208 +208,14 @@ private:
 
 private:
   std::mutex m_mutex;
-  bool m_shutdown { false };
+  std::condition_variable m_exit_condition;
+  bool m_exit_finished{false};
+  bool m_running{true};
+  std::condition_variable m_shutdown_condition;
   std::thread m_flushing_thread;
-  std::condition_variable m_shutdown_conditional;
+
   size_t m_head{0};
   size_t m_tail{0};
-  std::unique_ptr<buffer_array> m_buffer { std::make_unique<buffer_array>() };
+  std::unique_ptr<buffer_array_t> m_buffer{std::make_unique<buffer_array_t>()};
+  pid_t m_created_process;
 };
-
-class storage_parser
-{
-
-  template <typename T>
-  static void process_arg(const uint8_t *&data_pos, T &arg) {
-    if constexpr (std::is_same_v<T, std::string>) {
-      arg = std::string((const char *)data_pos);
-      data_pos += arg.size() + 1;
-    } else {
-      arg = *reinterpret_cast<const T *>(data_pos);
-      data_pos += sizeof(T);
-    }
-  }
-
-  template <typename... Args>
-  static void parse_data(const uint8_t *data_pos, Args &...args) {
-    (process_arg(data_pos, args), ...);
-  }
-public:
-
-  static size_t load(std::filesystem::path path) {
-    std::ifstream ifs(path, std::ios::binary | std::ios::ate);
-    if (!ifs) {
-      std::cerr << "Error opening file for writing: " << path << std::endl;
-      return 0;
-    }
-    std::ifstream::pos_type file_size = ifs.tellg();
-    ifs.seekg(0, std::ios::beg);
-
-    sample_type type;
-    size_t sample_size;
-    size_t total_count = 0;
-    size_t track_count = 0;
-    size_t process_count = 0;
-
-    while(!ifs.eof())
-    {
-
-      ifs.read(reinterpret_cast<char*>(&type), sizeof(type));
-      ifs.read(reinterpret_cast<char*>(&sample_size), sizeof(sample_size));
-
-
-      if(sample_size == 0 || ifs.eof())
-      {
-        continue;
-      }
-
-      std::vector<uint8_t> sample;
-      sample.reserve(sample_size);
-      ifs.read(reinterpret_cast<char*>(sample.data()), sample_size);
-
-      switch (type) {
-      case sample_type::track: {
-        track_sample data;
-        parse_data(sample.data(), data.track_name, data.node_id,
-                   data.process_id, data.thread_id, data.extdata);
-
-        if(data.node_id == track_count++) {
-          total_count++;
-        }
-        break;
-      }
-      case sample_type::process: {
-        process_sample data;
-        parse_data(sample.data(), data.guid, data.node_id,
-                   data.parent_process_id, data.process_id, data.init,
-                   data.fini, data.start, data.end, data.command, data.env,
-                   data.extdata);
-        if(data.node_id == process_count++) {
-          total_count++;
-        }
-
-        break;
-      }
-      case sample_type::pmc_event:
-      {
-        pmc_event data;
-        parse_data(sample.data(), data.pmc_info_name, data.value);
-        break;
-      }
-      default:
-        break;
-      }
-    }
-
-    ifs.close();
-    return total_count;
-  }
-
-  static size_t load(std::filesystem::path path, metadata::storage& metadata_storage) {
-    std::ifstream ifs(path, std::ios::binary | std::ios::ate);
-    if (!ifs) {
-      std::cerr << "Error opening file for writing: " << path << std::endl;
-      return 0;
-    }
-    std::ifstream::pos_type file_size = ifs.tellg();
-    ifs.seekg(0, std::ios::beg);
-
-    sample_type type;
-    size_t sample_size;
-    size_t total_count = 0;
-    size_t track_count = 0;
-    size_t process_count = 0;
-
-    while(!ifs.eof())
-    {
-
-      ifs.read(reinterpret_cast<char*>(&type), sizeof(type));
-      ifs.read(reinterpret_cast<char*>(&sample_size), sizeof(sample_size));
-
-
-      if(sample_size == 0 || ifs.eof())
-      {
-        continue;
-      }
-
-      std::vector<uint8_t> sample;
-      sample.reserve(sample_size);
-      ifs.read(reinterpret_cast<char*>(sample.data()), sample_size);
-
-      switch (type) {
-      case sample_type::track: {
-        track_sample data;
-        parse_data(sample.data(), data.track_name, data.node_id,
-                   data.process_id, data.thread_id, data.extdata);
-
-        if(data.node_id == track_count++) {
-          total_count++;
-        }
-        break;
-      }
-      case sample_type::process: {
-        process_sample data;
-        parse_data(sample.data(), data.guid, data.node_id,
-                   data.parent_process_id, data.process_id, data.init,
-                   data.fini, data.start, data.end, data.command, data.env,
-                   data.extdata);
-        if(data.node_id == process_count++) {
-          total_count++;
-        }
-
-        break;
-      }
-      case sample_type::pmc_event:
-      {
-        pmc_event data;
-        parse_data(sample.data(), data.pmc_info_name, data.value);
-
-        auto pmc_info = metadata_storage.get_pmc_info(data.pmc_info_name);
-        if (!pmc_info.has_value()) {
-          break;
-        }
-
-        auto agent = metadata_storage.get_agent_for_index(pmc_info->agent_index);
-        if(!agent.has_value()) {
-          break;
-        }
-
-        auto process = metadata_storage.get_current_process();
-        auto node = metadata_storage.get_current_node();
-
-        std::cout << ((agent->type == "CPU") ? BLUE : MAGENTA) << pmc_info->unique_name << " value: " << data.value << " " << pmc_info->unit << " for agent: " << agent->type << RESET << std::endl;
-
-        break;
-      }
-      default:
-        break;
-      }
-    }
-
-    ifs.close();
-    return total_count;
-  }
-};
-
-void store_track(storage& buffered_storage, const char *track_name, size_t node_id, size_t process_id,
-                 size_t thread_id, const char *extdata) {
-  buffered_storage.store(sample_type::track, track_name, node_id, process_id,
-                         thread_id, extdata);
-}
-void store_process(storage& buffered_storage, std::string guid, size_t node_id, size_t parent_process_id,
-                   size_t process_id, size_t init, size_t fini, size_t start,
-                   size_t end, std::string command, std::string env,
-                   std::string extdata) {
-  buffered_storage.store(sample_type::process, guid.c_str(), node_id,
-                         parent_process_id, process_id, init, fini, start, end,
-                         command.c_str(), env.c_str(), extdata.c_str());
-}
-
-void store_pmc_event(storage& buffered_storage, const char* pmc_info_name, uint32_t value)
-{
-  buffered_storage.store(sample_type::pmc_event, pmc_info_name, value>);
-}
-
-} // namespace cache
-
-#endif
