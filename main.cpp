@@ -1,80 +1,126 @@
 #include "cache_storage.hpp"
+#include "cacheable.hpp"
+#include "storage_parser.hpp"
 
-struct track_sample : public cacheable_t {
-  std::string track_name;
-  size_t node_id;
-  size_t process_id;
-  size_t thread_id;
-  std::string extdata;
+struct track_sample : public cacheable_t
+{
+    explicit track_sample(std::string _track_name, size_t _node_id, size_t _process_id,
+                          size_t _thread_id, std::string _extdata)
+    : track_name(std::move(_track_name))
+    , node_id(_node_id)
+    , process_id(_process_id)
+    , thread_id(_thread_id)
+    , extdata(_extdata)
+    {}
+    track_sample() = default;
+
+    static constexpr type_identifier_t type_identifier = type_identifier_t::track_sample;
+
+    std::string track_name;
+    size_t      node_id;
+    size_t      process_id;
+    size_t      thread_id;
+    std::string extdata;
 };
 
-struct process_sample : public cacheable_t {
-  std::string guid;
-  size_t node_id;
-  size_t parent_process_id;
-  size_t process_id;
-  size_t init;
-  size_t fini;
-  size_t start;
-  size_t end;
-  std::string command;
-  std::string env;
-  std::string extdata;
-};
-
-void run_multithread_example(buffered_storage &buffered_storage) {
-  const auto number_of_iterations = 10000000;
-
-  std::vector<std::thread> threads;
-
-  threads.push_back(std::thread([&]() {
-    auto node_id = 0;
-    auto process_id = 1;
-    auto thread_id = 2;
-    auto count = 0;
-    do {
-      // cache::store_track(buffered_storage, "GPU 1", node_id++, process_id++,
-      // thread_id++, "{}");
-      count++;
-    } while (count != number_of_iterations);
-  }));
-
-  threads.push_back(std::thread([&]() {
-    auto node_id = 0;
-
-    auto parent_process_id = 1;
-    auto process_id = 1;
-    auto init = 2;
-    auto fini = 2;
-    auto start = 2;
-    auto end = 2;
-    auto count = 0;
-    do {
-      // cache::store_process(buffered_storage, "GUID", node_id++,
-      // parent_process_id++,process_id++,
-      //                      init++, fini++, start++, end++,
-      //                      "/my/command.exe", "{ BBBBBBBBBBBBBB }",
-      //                      "{AAAAAAAAAAAAAAAAAA}");
-      //                      count++;
-    } while (count != number_of_iterations);
-  }));
-
-  for (auto &thread : threads) {
-    thread.join();
-  }
-
-  // buffered_storage.shutdown();
-
-  std::cout << "Writing to cache is done. Validating cache.." << std::endl;
-
-  //  cache::storage_parser::load({ cache::filename });
-  // auto expected_count = threads.size() * number_of_iterations;
-  // std::cout << (read_count != expected_count ? "Validation failed."
-  //                                            : "Validation successful.")
-  //           << std::endl;
+template <>
+void
+serialize(uint8_t* buffer, const track_sample& item)
+{
+    size_t position = 0;
+    store_value(item.track_name.c_str(), buffer, position);
+    store_value(item.node_id, buffer, position);
+    store_value(item.process_id, buffer, position);
+    store_value(item.thread_id, buffer, position);
+    store_value(item.extdata.c_str(), buffer, position);
 }
 
-int main() {
-  buffered_storage buffered_storage;
-  run_multithread_example(buffered_storage);
+template <>
+track_sample
+deserialize(uint8_t*& buffer)
+{
+    track_sample result;
+    process_arg(buffer, result.track_name);
+    process_arg(buffer, result.node_id);
+    process_arg(buffer, result.process_id);
+    process_arg(buffer, result.thread_id);
+    process_arg(buffer, result.extdata);
+    return result;
+}
+
+auto
+get_size(const track_sample& item)
+{
+    return get_size_helper(item.track_name.c_str()) + get_size_helper(item.node_id) +
+           get_size_helper(item.process_id) + get_size_helper(item.thread_id) +
+           get_size_helper(item.extdata.c_str());
+}
+
+struct process_sample : public cacheable_t
+{
+    std::string guid;
+    size_t      node_id;
+    size_t      parent_process_id;
+    size_t      process_id;
+    size_t      init;
+    size_t      fini;
+    size_t      start;
+    size_t      end;
+    std::string command;
+    std::string env;
+    std::string extdata;
+};
+
+template <typename worker_factory>
+void
+run_multithread_example(buffered_storage<my_worker_factory>& buffered_storage)
+{
+    const auto number_of_iterations = 1000;
+
+    std::vector<std::thread> threads;
+
+    threads.push_back(std::thread([&]() {
+        size_t node_id    = 1;
+        size_t process_id = 2;
+        size_t thread_id  = 3;
+        size_t count      = 0;
+
+        do
+        {
+            auto track_name = "track_name_" + std::to_string(node_id);
+            buffered_storage.store(
+                track_sample{ track_name, node_id, process_id, thread_id, "{}" });
+
+            node_id++;
+            process_id++;
+            thread_id++;
+            count++;
+        } while(count != number_of_iterations);
+    }));
+
+    for(auto& thread : threads)
+    {
+        thread.join();
+    }
+
+    buffered_storage.shutdown();
+
+    storage_parser<track_sample> parser(get_buffered_storage_filename(0, 0));
+    parser.register_type_callback(type_identifier_t::track_sample,
+                                  [](const cacheable_t& p) {
+                                      auto track = static_cast<const track_sample&>(p);
+                                      std::cout << track.track_name << std::endl;
+                                      std::cout << track.node_id << std::endl;
+                                      std::cout << track.process_id << std::endl;
+                                      std::cout << track.thread_id << std::endl;
+                                      std::cout << track.extdata << std::endl;
+                                  });
+    parser.load();
+}
+
+int
+main()
+{
+    buffered_storage<my_worker_factory> buffered_storage;
+    run_multithread_example<my_worker_factory>(buffered_storage);
 }
