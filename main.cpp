@@ -3,7 +3,13 @@
 #include "storage_parser.hpp"
 #include <string>
 
-// Samples definitions
+// ---------------- Samples definitions ----------------
+enum class type_identifier_t : uint32_t
+{
+    track_sample     = 0,
+    process_sample   = 1,
+    fragmented_space = 0xFFFF
+};
 
 struct track_sample : public cacheable_t
 {
@@ -143,17 +149,17 @@ get_size(const process_sample& item)
            get_size_helper(item.extdata.c_str());
 }
 
-// rocpd post processing
+// ---------------- rocpd post processing ----------------
 
 struct rocpd_post_processing
 : public storage_post_processing<track_sample, process_sample>
 {
     template <typename T>
-    std::vector<postprocessing_callback> get_callbacks() const;
+    postprocessing_callback_list get_callbacks() const;
 };
 
 template <>
-std::vector<postprocessing_callback>
+postprocessing_callback_list
 rocpd_post_processing::get_callbacks<track_sample>() const
 {
     return { [](const cacheable_t& t) {
@@ -163,7 +169,7 @@ rocpd_post_processing::get_callbacks<track_sample>() const
 }
 
 template <>
-std::vector<postprocessing_callback>
+postprocessing_callback_list
 rocpd_post_processing::get_callbacks<process_sample>() const
 {
     return { [](const cacheable_t& t) {
@@ -172,11 +178,13 @@ rocpd_post_processing::get_callbacks<process_sample>() const
     } };
 }
 
-template <typename WorkerType>
+// ---------------- Example ----------------
+
 void
-run_multithread_example(buffered_storage<WorkerType>& buffered_storage)
+run_multithread_example()
 {
-    const auto number_of_iterations = 1000;
+    ::buffered_storage<flush_worker, type_identifier_t> buffered_storage;
+    const auto                                          number_of_iterations = 1000;
 
     std::vector<std::thread> threads;
 
@@ -217,8 +225,8 @@ run_multithread_example(buffered_storage<WorkerType>& buffered_storage)
 
     buffered_storage.shutdown();
 
-    rocpd_post_processing config;
-    storage_parser        parser(get_buffered_storage_filename(0, 0), config);
+    storage_parser<type_identifier_t, rocpd_post_processing> parser(
+        get_buffered_storage_filename(0, 0), {});
 
     parser.load();
 }
@@ -226,6 +234,5 @@ run_multithread_example(buffered_storage<WorkerType>& buffered_storage)
 int
 main()
 {
-    ::buffered_storage<flush_worker> buffered_storage;
-    run_multithread_example(buffered_storage);
+    run_multithread_example();
 }

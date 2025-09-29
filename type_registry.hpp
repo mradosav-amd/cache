@@ -1,28 +1,21 @@
 #pragma once
 #include "cacheable.hpp"
 #include <functional>
+#include <map>
 #include <optional>
-#include <unordered_map>
-#include <variant>
 
-template <typename TupleOfSupportedTypes>
+template <typename TupleOfSupportedTypes, typename TypeIdentifierEnum>
 class type_registry
 {
-    // helper to translate tuple to variant
-    template <typename T>
-    struct tuple_to_variant;
-    template <typename... Types>
-    struct tuple_to_variant<std::tuple<Types...>>
-    {
-        using type = std::variant<Types...>;
-    };
+    static_assert(is_enum_class_v<TypeIdentifierEnum>,
+                  "TypeIdentifierEnum must be an enum class");
 
 public:
     using variant_t = typename tuple_to_variant<TupleOfSupportedTypes>::type;
 
     type_registry() { register_all_types(); }
 
-    std::optional<variant_t> get_type(type_identifier_t id, uint8_t*& data)
+    std::optional<variant_t> get_type(TypeIdentifierEnum id, uint8_t*& data)
     {
         auto it = deserializers.find(id);
         if(it != deserializers.end())
@@ -33,26 +26,27 @@ public:
     }
 
 private:
-    std::unordered_map<type_identifier_t, std::function<variant_t(uint8_t*&)>>
-        deserializers;
+    std::map<TypeIdentifierEnum, std::function<variant_t(uint8_t*&)>> deserializers;
 
     template <typename T>
-    void register_type()
+    inline void register_type()
     {
-        static_assert(has_type_identifier<T>::value, "Type must have type_identifier");
+        static_assert(has_type_identifier<T, TypeIdentifierEnum>::value,
+                      "Type must have type_identifier");
+        static_assert(has_deserialize<T>::value, "Type must have deserialize function");
         deserializers[T::type_identifier] = [](uint8_t*& data) -> variant_t {
             return deserialize<T>(data);
         };
     }
 
-    template <std::size_t I = 0>
+    template <std::size_t Index = 0>
     void register_all_types()
     {
-        if constexpr(I < std::tuple_size_v<TupleOfSupportedTypes>)
+        if constexpr(Index < std::tuple_size_v<TupleOfSupportedTypes>)
         {
-            using Type = std::tuple_element_t<I, TupleOfSupportedTypes>;
+            using Type = std::tuple_element_t<Index, TupleOfSupportedTypes>;
             register_type<Type>();
-            register_all_types<I + 1>();
+            register_all_types<Index + 1>();
         }
     }
 };

@@ -108,8 +108,6 @@ struct flush_worker
         _ofs.close();
         m_worker_synchronization->exit_finished = true;
         m_worker_synchronization->exit_finished_condition.notify_one();
-
-        std::cout << "thread finished" << std::endl;
     }
 
 private:
@@ -134,9 +132,12 @@ struct worker_factory
     };
 };
 
-template <typename WorkerType>
+template <typename WorkerType, typename TypeIdentifierEnum>
 class buffered_storage
 {
+    static_assert(is_enum_class_v<TypeIdentifierEnum>,
+                  "TypeIdentifierEnum must be an enum class");
+
 public:
     explicit buffered_storage()
     : m_flushing_thread{ worker_factory::get_worker<WorkerType>(
@@ -145,19 +146,24 @@ public:
 
     ~buffered_storage() { m_flushing_thread.detach(); }
 
-    template <typename Tp>
-    auto store(const Tp& val)
+    template <typename Type>
+    auto store(const Type& value)
     {
-        check_type<Tp>();
-        size_t sample_size = get_size(val);
-        size_t to_reserve  = header_size + sample_size;
-        auto*  buf         = reserve_memory_space(to_reserve);
-        size_t position    = 0;
-        store_value(static_cast<std::underlying_type_t<decltype(Tp::type_identifier)>>(
-                        Tp::type_identifier),
-                    buf, position);
+        check_type<Type, TypeIdentifierEnum>();
+
+        using TypeIdentifierEnumUderlayingType =
+            std::underlying_type_t<TypeIdentifierEnum>;
+
+        size_t sample_size      = get_size(value);
+        size_t bytes_to_reserve = header_size<TypeIdentifierEnum> + sample_size;
+        auto*  buf              = reserve_memory_space(bytes_to_reserve);
+        size_t position         = 0;
+        auto   type_identifier_value =
+            static_cast<TypeIdentifierEnumUderlayingType>(Type::type_identifier);
+
+        store_value(type_identifier_value, buf, position);
         store_value(sample_size, buf, position);
-        serialize(buf + position, val);
+        serialize(buf + position, value);
     }
 
     void shutdown()
@@ -170,8 +176,6 @@ public:
         std::unique_lock _exit_lock{ _exit_mutex };
         m_worker_synchronization->exit_finished_condition.wait(
             _exit_lock, [&]() { return m_worker_synchronization->exit_finished; });
-
-        std::cout << "shutdown finished" << std::endl;
     }
 
 private:
@@ -180,31 +184,33 @@ private:
         auto* _data = m_cache_buffer_ptr->array->data();
         memset(_data + m_cache_buffer_ptr->head, 0xFFFF,
                buffer_size - m_cache_buffer_ptr->head);
-        *reinterpret_cast<type_identifier_t*>(_data + m_cache_buffer_ptr->head) =
-            type_identifier_t::fragmented_space;
+        *reinterpret_cast<TypeIdentifierEnum*>(_data + m_cache_buffer_ptr->head) =
+            TypeIdentifierEnum::fragmented_space;
 
-        size_t remaining_bytes = buffer_size - m_cache_buffer_ptr->head - header_size;
+        size_t remaining_bytes =
+            buffer_size - m_cache_buffer_ptr->head - header_size<TypeIdentifierEnum>;
         *reinterpret_cast<size_t*>(_data + m_cache_buffer_ptr->head +
-                                   sizeof(type_identifier_t)) = remaining_bytes;
-        m_cache_buffer_ptr->head                              = 0;
+                                   sizeof(TypeIdentifierEnum)) = remaining_bytes;
+        m_cache_buffer_ptr->head                               = 0;
     }
 
-    uint8_t* reserve_memory_space(size_t len)
+    uint8_t* reserve_memory_space(const size_t& number_of_bytes)
     {
         size_t _size;
         {
             std::lock_guard scope{ m_cache_buffer_ptr->mutex };
 
-            if((m_cache_buffer_ptr->head + len + header_size) > buffer_size)
+            if((m_cache_buffer_ptr->head + number_of_bytes +
+                header_size<TypeIdentifierEnum>) > buffer_size)
             {
                 fragment_memory();
             }
             _size                    = m_cache_buffer_ptr->head;
-            m_cache_buffer_ptr->head = m_cache_buffer_ptr->head + len;
+            m_cache_buffer_ptr->head = m_cache_buffer_ptr->head + number_of_bytes;
         }
 
         auto* _result = m_cache_buffer_ptr->array->data() + _size;
-        memset(_result, 0, len);
+        memset(_result, 0, number_of_bytes);
         return _result;
     }
 

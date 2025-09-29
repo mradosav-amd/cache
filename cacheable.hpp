@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <string>
 #include <type_traits>
+#include <variant>
 #include <vector>
 
 // define types
@@ -12,13 +13,6 @@
 struct cacheable_t
 {
     cacheable_t() = default;
-};
-
-enum class type_identifier_t : uint32_t
-{
-    track_sample     = 0,
-    process_sample   = 1,
-    fragmented_space = 0xFFFF
 };
 
 // utility
@@ -36,10 +30,20 @@ const auto get_buffered_storage_filename = [](const int& ppid, const int& pid) {
                         std::to_string(pid) + ".bin" };
 };
 
-constexpr size_t header_size = sizeof(type_identifier_t) + sizeof(size_t);
+template <typename TypeIdentifierEnum>
+constexpr size_t header_size = sizeof(TypeIdentifierEnum) + sizeof(size_t);
 using buffer_array_t         = std::array<uint8_t, buffer_size>;
 
 // template definitions
+
+template <typename T>
+struct tuple_to_variant;
+
+template <typename... Types>
+struct tuple_to_variant<std::tuple<Types...>>
+{
+    using type = std::variant<Types...>;
+};
 
 template <typename T>
 struct always_false : std::false_type
@@ -72,6 +76,16 @@ get_size(const T&)
 
 template <class...>
 using void_t = void;
+
+// is enum class type trait
+template <typename T>
+struct is_enum_class
+: std::bool_constant<std::is_enum_v<T> &&
+                     !std::is_convertible_v<T, std::underlying_type_t<T>>>
+{};
+
+template <typename T>
+inline constexpr bool is_enum_class_v = is_enum_class<T>::value;
 
 // serialize type trait
 
@@ -108,25 +122,28 @@ struct has_get_size<T, void_t<decltype(get_size(std::declval<const T&>()))>>
 : std::true_type
 {};
 
-template <class T, class = void>
+// type identifier type trait
+
+template <typename T, typename TypeIdentifierEnum, typename = void>
 struct has_type_identifier : std::false_type
 {};
 
-template <class T>
-struct has_type_identifier<T, void_t<decltype(T::type_identifier)>>
+template <class T, typename TypeIdentifierEnum>
+struct has_type_identifier<T, TypeIdentifierEnum, void_t<decltype(T::type_identifier)>>
 : std::bool_constant<
-      std::is_convertible_v<decltype(T::type_identifier), type_identifier_t>>
+      is_enum_class_v<TypeIdentifierEnum> &&
+      std::is_convertible_v<decltype(T::type_identifier), TypeIdentifierEnum>>
 {};
 
-template <typename Tp>
+template <typename Tp, typename TypeIdentifierEnum>
 void
 check_type()
 {
     static_assert(has_serialize<Tp>::value, "Type don't have `serialize` function.");
     static_assert(has_deserialize<Tp>::value, "Type don't have `deserialize` function.");
     static_assert(has_get_size<Tp>::value, "Type don't have `get_size` function.");
-    static_assert(has_type_identifier<Tp>::value,
-                  "Type don't have `type_identifier` member of type type_identifier_t.");
+    static_assert(has_type_identifier<Tp, TypeIdentifierEnum>::value,
+                  "Type don't have `type_identifier` member with correct type.");
 }
 
 template <typename... Types>
