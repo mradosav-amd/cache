@@ -149,33 +149,27 @@ get_size(const process_sample& item)
            get_size_helper(item.extdata.c_str());
 }
 
-// ---------------- rocpd post processing ----------------
+// ---------------- post processing ----------------
 
-struct rocpd_post_processing
-: public storage_post_processing<track_sample, process_sample>
+void
+execute_sample_processing(type_identifier_t type_identifier, const cacheable_t& value)
 {
-    template <typename T>
-    postprocessing_callback_list get_callbacks() const;
-};
-
-template <>
-postprocessing_callback_list
-rocpd_post_processing::get_callbacks<track_sample>() const
-{
-    return { [](const cacheable_t& t) {
-        auto track = static_cast<const track_sample&>(t);
-        std::cout << "track sample:" << track.track_name << std::endl;
-    } };
-}
-
-template <>
-postprocessing_callback_list
-rocpd_post_processing::get_callbacks<process_sample>() const
-{
-    return { [](const cacheable_t& t) {
-        auto process = static_cast<const process_sample&>(t);
-        std::cout << "process sample:" << process.command << std::endl;
-    } };
+    switch(type_identifier)
+    {
+        case type_identifier_t::track_sample:
+        {
+            auto track = static_cast<const track_sample&>(value);
+            std::cout << "track sample:" << track.track_name << std::endl;
+            break;
+        }
+        case type_identifier_t::process_sample:
+        {
+            auto process = static_cast<const process_sample&>(value);
+            std::cout << "process sample:" << process.command << std::endl;
+            break;
+        }
+        default: break;
+    }
 }
 
 // ---------------- Example ----------------
@@ -225,8 +219,8 @@ run_multithread_example()
 
     buffered_storage.shutdown();
 
-    storage_parser<type_identifier_t, rocpd_post_processing> parser(
-        get_buffered_storage_filename(0, 0), {});
+    storage_parser<type_identifier_t, track_sample, process_sample> parser(
+        get_buffered_storage_filename(0, 0));
 
     parser.load();
 }

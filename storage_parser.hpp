@@ -18,6 +18,10 @@
 #include <string>
 #include <vector>
 
+template <typename TypeIdentifierEnum>
+void
+execute_sample_processing(TypeIdentifierEnum type_identifier, const cacheable_t& value);
+
 using postprocessing_callback      = std::function<void(const cacheable_t&)>;
 using postprocessing_callback_list = std::vector<postprocessing_callback>;
 
@@ -33,19 +37,19 @@ struct storage_post_processing
         return {};
     }
 };
+struct track_sample;
+struct process_sample;
 
-template <typename TypeIdentifierEnum, typename StoragePostProcessing>
+template <typename TypeIdentifierEnum, typename... SupportedTypes>
 class storage_parser
 {
     static_assert(is_enum_class_v<TypeIdentifierEnum>,
                   "TypeIdentifierEnum must be an enum class");
 
 public:
-    storage_parser(std::string _filename, const StoragePostProcessing& _config)
+    storage_parser(std::string _filename)
     : m_filename(std::move(_filename))
-    {
-        register_all_callbacks(_config);
-    }
+    {}
 
     void register_on_finished_callback(std::unique_ptr<std::function<void()>> callback)
     {
@@ -65,8 +69,6 @@ public:
             throw std::runtime_error(ss.str());
         }
 
-        bool _parsing_needed = !m_callbacks.empty();
-
         struct __attribute__((packed)) sample_header
         {
             TypeIdentifierEnum type;
@@ -75,7 +77,7 @@ public:
 
         sample_header header;
 
-        while(!ifs.eof() && _parsing_needed)
+        while(!ifs.eof())
         {
             ifs.read(reinterpret_cast<char*>(&header), sizeof(header));
 
@@ -97,14 +99,23 @@ public:
                 continue;
             }
 
+            if(header.type == TypeIdentifierEnum::fragmented_space)
+            {
+                continue;
+            }
+
             auto data = sample.data();
 
             auto sample_value = m_registry.get_type(header.type, data);
             if(sample_value.has_value())
             {
-                std::visit([this, type = header.type](
-                               const auto& value) { invoke_callbacks(type, value); },
-                           sample_value.value());
+                const cacheable_t& cacheable_value = std::visit(
+                    [](auto& arg) -> cacheable_t& {
+                        return static_cast<cacheable_t&>(arg);
+                    },
+                    sample_value.value());
+
+                execute_sample_processing(header.type, cacheable_value);
             }
             else
             {
@@ -125,43 +136,7 @@ public:
     }
 
 private:
-    template <std::size_t I = 0>
-    inline void register_callbacks_for_types(const StoragePostProcessing& _postprocessing)
-    {
-        if constexpr(I <
-                     std::tuple_size_v<typename StoragePostProcessing::supported_types>)
-        {
-            using Type =
-                std::tuple_element_t<I, typename StoragePostProcessing::supported_types>;
-            auto callbacks = _postprocessing.template get_callbacks<Type>();
-            m_callbacks[Type::type_identifier] = std::move(callbacks);
-            register_callbacks_for_types<I + 1>(_postprocessing);
-        }
-    }
-
-    inline void register_all_callbacks(const StoragePostProcessing& _postprocessing)
-    {
-        register_callbacks_for_types(_postprocessing);
-    }
-
-    inline void invoke_callbacks(TypeIdentifierEnum type, const cacheable_t& parsed)
-    {
-        auto _callback_list = m_callbacks.find(type);
-        if(_callback_list == m_callbacks.end())
-        {
-            std::cout << "Callback not found for cache postprocessing" << std::endl;
-            return;
-        }
-
-        for(auto& cb : _callback_list->second)
-        {
-            cb(parsed);
-        }
-    }
-
-    std::string                                                m_filename;
-    std::map<TypeIdentifierEnum, postprocessing_callback_list> m_callbacks;
+    std::string                            m_filename;
     std::unique_ptr<std::function<void()>> m_on_finished_callback{ nullptr };
-    type_registry<typename StoragePostProcessing::supported_types, TypeIdentifierEnum>
-        m_registry;
+    type_registry<TypeIdentifierEnum, SupportedTypes...> m_registry;  // todo
 };

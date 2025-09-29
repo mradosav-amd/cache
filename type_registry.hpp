@@ -1,19 +1,20 @@
 #pragma once
 #include "cacheable.hpp"
 #include <functional>
+#include <iostream>
 #include <map>
 #include <optional>
 
-template <typename TupleOfSupportedTypes, typename TypeIdentifierEnum>
+template <typename TypeIdentifierEnum, typename... SupportedTypes>
 class type_registry
 {
     static_assert(is_enum_class_v<TypeIdentifierEnum>,
                   "TypeIdentifierEnum must be an enum class");
 
 public:
-    using variant_t = typename tuple_to_variant<TupleOfSupportedTypes>::type;
+    using variant_t = typename std::variant<SupportedTypes...>;
 
-    type_registry() { register_all_types(); }
+    type_registry() { (register_type<SupportedTypes>(), ...); }
 
     std::optional<variant_t> get_type(TypeIdentifierEnum id, uint8_t*& data)
     {
@@ -34,19 +35,9 @@ private:
         static_assert(has_type_identifier<T, TypeIdentifierEnum>::value,
                       "Type must have type_identifier");
         static_assert(has_deserialize<T>::value, "Type must have deserialize function");
+        std::cout << "Register type:" << (int) T::type_identifier << std::endl;
         deserializers[T::type_identifier] = [](uint8_t*& data) -> variant_t {
             return deserialize<T>(data);
         };
-    }
-
-    template <std::size_t Index = 0>
-    void register_all_types()
-    {
-        if constexpr(Index < std::tuple_size_v<TupleOfSupportedTypes>)
-        {
-            using Type = std::tuple_element_t<Index, TupleOfSupportedTypes>;
-            register_type<Type>();
-            register_all_types<Index + 1>();
-        }
     }
 };
