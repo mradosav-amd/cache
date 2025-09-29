@@ -24,25 +24,30 @@
 #include <type_traits>
 #include <vector>
 
-using postprocessing_callback = std::function<void(const cacheable_t&)>;
+using postprocessing_callback      = std::function<void(const cacheable_t&)>;
+using postprocessing_callback_list = std::vector<postprocessing_callback>;
 
 template <typename... SupportedTypes>
+struct storage_post_processing
+{
+    using supported_types = std::tuple<SupportedTypes...>;
+
+    template <typename Type>
+    std::vector<postprocessing_callback> get_callbacks() const
+    {
+        static_assert(false, "Define concrete storage config.");
+        return {};
+    }
+};
+
+template <typename StoragePostProcessing>
 class storage_parser
 {
 public:
-    storage_parser(std::string _filename)
+    storage_parser(std::string _filename, StoragePostProcessing _postprocessing)
     : m_filename(std::move(_filename))
-    {}
-
-    template <typename Type>
-    void register_type_callback(const std::function<void(const cacheable_t&)>& callback)
     {
-        static_assert(has_type_identifier<Type>::value,
-                      "Provided type don't have type identifier .");
-        static_assert(has_deserialize<Type>::value,
-                      "Provided type don't have deserialize function.");
-
-        m_callbacks[Type::type_identifier] = callback;
+        register_all_callbacks(_postprocessing);
     }
 
     void register_on_finished_callback(std::unique_ptr<std::function<void()>> callback)
@@ -100,8 +105,13 @@ public:
             auto sample_value = m_registry.get_type(header.type, data);
             if(sample_value.has_value())
             {
-                std::visit([&](auto& value) { invoke_callbacks(header.type, value); },
-                           sample_value.value());
+                std::visit(
+                    [&](const auto& value) {
+                        const cacheable_t& cacheable_ref =
+                            static_cast<const cacheable_t&>(value);
+                        invoke_callbacks(header.type, cacheable_ref);
+                    },
+                    sample_value.value());
             }
             else
             {
@@ -122,10 +132,23 @@ public:
     }
 
 private:
-    template <typename... Args>
-    static void parse_data(const uint8_t* data_pos, Args&... args)
+    template <std::size_t I = 0>
+    void register_callbacks_for_types(const StoragePostProcessing& _postprocessing)
     {
-        (process_arg(data_pos, args), ...);
+        if constexpr(I <
+                     std::tuple_size_v<typename StoragePostProcessing::supported_types>)
+        {
+            using Type =
+                std::tuple_element_t<I, typename StoragePostProcessing::supported_types>;
+            auto callbacks = _postprocessing.template get_callbacks<Type>();
+            m_callbacks[Type::type_identifier] = std::move(callbacks);
+            register_callbacks_for_types<I + 1>(_postprocessing);
+        }
+    }
+
+    void register_all_callbacks(const StoragePostProcessing& _postprocessing)
+    {
+        register_callbacks_for_types(_postprocessing);
     }
 
     void invoke_callbacks(type_identifier_t type, const cacheable_t& parsed)
@@ -143,8 +166,8 @@ private:
         }
     }
 
-    std::string                                                       m_filename;
-    std::map<type_identifier_t, std::vector<postprocessing_callback>> m_callbacks;
+    std::string                                               m_filename;
+    std::map<type_identifier_t, postprocessing_callback_list> m_callbacks;
     std::unique_ptr<std::function<void()>> m_on_finished_callback{ nullptr };
-    type_registry<SupportedTypes...>       m_registry;
+    type_registry<typename StoragePostProcessing::supported_types> m_registry;
 };

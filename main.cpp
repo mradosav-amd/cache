@@ -1,6 +1,9 @@
 #include "cache_storage.hpp"
 #include "cacheable.hpp"
 #include "storage_parser.hpp"
+#include <string>
+
+// Samples definitions
 
 struct track_sample : public cacheable_t
 {
@@ -140,6 +143,35 @@ get_size(const process_sample& item)
            get_size_helper(item.extdata.c_str());
 }
 
+// rocpd post processing
+
+struct rocpd_post_processing
+: public storage_post_processing<track_sample, process_sample>
+{
+    template <typename T>
+    std::vector<postprocessing_callback> get_callbacks() const;
+};
+
+template <>
+std::vector<postprocessing_callback>
+rocpd_post_processing::get_callbacks<track_sample>() const
+{
+    return { [](const cacheable_t& t) {
+        auto track = static_cast<const track_sample&>(t);
+        std::cout << "track sample:" << track.track_name << std::endl;
+    } };
+}
+
+template <>
+std::vector<postprocessing_callback>
+rocpd_post_processing::get_callbacks<process_sample>() const
+{
+    return { [](const cacheable_t& t) {
+        auto process = static_cast<const process_sample&>(t);
+        std::cout << "process sample:" << process.command << std::endl;
+    } };
+}
+
 template <typename WorkerType>
 void
 run_multithread_example(buffered_storage<WorkerType>& buffered_storage)
@@ -171,7 +203,9 @@ run_multithread_example(buffered_storage<WorkerType>& buffered_storage)
         size_t count = 0;
         do
         {
-            buffered_storage.store(process_sample{});
+            process_sample ps;
+            ps.command = std::to_string(count);
+            buffered_storage.store(ps);
             count++;
         } while(count != number_of_iterations);
     }));
@@ -183,23 +217,8 @@ run_multithread_example(buffered_storage<WorkerType>& buffered_storage)
 
     buffered_storage.shutdown();
 
-    storage_parser parser(get_buffered_storage_filename(0, 0));
-
-    parser.register_type_callback<track_sample>([](const cacheable_t& p) {
-        auto track = static_cast<const track_sample&>(p);
-        std::cout << track.track_name << std::endl;
-        std::cout << track.node_id << std::endl;
-        std::cout << track.process_id << std::endl;
-        std::cout << track.thread_id << std::endl;
-        std::cout << track.extdata << std::endl;
-    });
-
-    parser.register_type_callback<process_sample>([](const cacheable_t& p) {
-        auto process = static_cast<const process_sample&>(p);
-        std::cout << process.node_id << std::endl;
-        std::cout << process.process_id << std::endl;
-        std::cout << process.end << std::endl;
-    });
+    rocpd_post_processing config;
+    storage_parser        parser(get_buffered_storage_filename(0, 0), config);
 
     parser.load();
 }
