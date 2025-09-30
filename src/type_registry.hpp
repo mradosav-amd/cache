@@ -1,14 +1,17 @@
 #pragma once
-#include "cacheable.hpp"
+#include "cache_type_traits.hpp"
 #include <functional>
 #include <iostream>
 #include <map>
 #include <optional>
 
+namespace trace_cache
+{
+
 template <typename TypeIdentifierEnum, typename... SupportedTypes>
 class type_registry
 {
-    static_assert(is_enum_class_v<TypeIdentifierEnum>,
+    static_assert(type_traits::is_enum_class_v<TypeIdentifierEnum>,
                   "TypeIdentifierEnum must be an enum class");
 
 public:
@@ -32,12 +35,14 @@ private:
     template <typename T>
     inline void register_type()
     {
-        static_assert(has_type_identifier<T, TypeIdentifierEnum>::value,
+        static_assert(type_traits::has_type_identifier<T, TypeIdentifierEnum>::value,
                       "Type must have type_identifier");
-        static_assert(has_deserialize<T>::value, "Type must have deserialize function");
-        std::cout << "Register type:" << (int) T::type_identifier << std::endl;
+        static_assert(type_traits::has_deserialize<T>::value,
+                      "Type must have deserialize function");
         deserializers[T::type_identifier] = [](uint8_t*& data) -> variant_t {
             return deserialize<T>(data);
         };
     }
 };
+
+}  // namespace trace_cache

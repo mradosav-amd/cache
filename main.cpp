@@ -1,6 +1,6 @@
-#include "cache_storage.hpp"
-#include "cacheable.hpp"
-#include "storage_parser.hpp"
+#include "src/cache_storage.hpp"
+#include "src/cacheable.hpp"
+#include "src/storage_parser.hpp"
 #include <string>
 
 // ---------------- Samples definitions ----------------
@@ -11,7 +11,7 @@ enum class type_identifier_t : uint32_t
     fragmented_space = 0xFFFF
 };
 
-struct track_sample : public cacheable_t
+struct track_sample : public trace_cache::cacheable_t
 {
     explicit track_sample(std::string _track_name, size_t _node_id, size_t _process_id,
                           size_t _thread_id, std::string _extdata)
@@ -34,38 +34,41 @@ struct track_sample : public cacheable_t
 
 template <>
 void
-serialize(uint8_t* buffer, const track_sample& item)
+trace_cache::serialize(uint8_t* buffer, const track_sample& item)
 {
     size_t position = 0;
-    store_value(item.track_name.c_str(), buffer, position);
-    store_value(item.node_id, buffer, position);
-    store_value(item.process_id, buffer, position);
-    store_value(item.thread_id, buffer, position);
-    store_value(item.extdata.c_str(), buffer, position);
+    utility::store_value(item.track_name.c_str(), buffer, position);
+    utility::store_value(item.node_id, buffer, position);
+    utility::store_value(item.process_id, buffer, position);
+    utility::store_value(item.thread_id, buffer, position);
+    utility::store_value(item.extdata.c_str(), buffer, position);
 }
 
 template <>
 track_sample
-deserialize(uint8_t*& buffer)
+trace_cache::deserialize(uint8_t*& buffer)
 {
     track_sample result;
-    process_arg(buffer, result.track_name);
-    process_arg(buffer, result.node_id);
-    process_arg(buffer, result.process_id);
-    process_arg(buffer, result.thread_id);
-    process_arg(buffer, result.extdata);
+    utility::parse_value(buffer, result.track_name);
+    utility::parse_value(buffer, result.node_id);
+    utility::parse_value(buffer, result.process_id);
+    utility::parse_value(buffer, result.thread_id);
+    utility::parse_value(buffer, result.extdata);
     return result;
 }
 
-auto
-get_size(const track_sample& item)
+template <>
+size_t
+trace_cache::get_size(const track_sample& item)
 {
-    return get_size_helper(item.track_name.c_str()) + get_size_helper(item.node_id) +
-           get_size_helper(item.process_id) + get_size_helper(item.thread_id) +
-           get_size_helper(item.extdata.c_str());
+    return utility::get_size_helper(item.track_name.c_str()) +
+           utility::get_size_helper(item.node_id) +
+           utility::get_size_helper(item.process_id) +
+           utility::get_size_helper(item.thread_id) +
+           utility::get_size_helper(item.extdata.c_str());
 }
 
-struct process_sample : public cacheable_t
+struct process_sample : public trace_cache::cacheable_t
 {
     explicit process_sample(std::string _guid, size_t _node_id, size_t _parent_process_id,
                             size_t _process_id, size_t _init, size_t _fini, size_t _start,
@@ -103,72 +106,111 @@ struct process_sample : public cacheable_t
 
 template <>
 void
-serialize(uint8_t* buffer, const process_sample& item)
+trace_cache::serialize(uint8_t* buffer, const process_sample& item)
 {
     size_t position = 0;
-    store_value(item.guid.c_str(), buffer, position);
-    store_value(item.node_id, buffer, position);
-    store_value(item.parent_process_id, buffer, position);
-    store_value(item.process_id, buffer, position);
-    store_value(item.init, buffer, position);
-    store_value(item.fini, buffer, position);
-    store_value(item.start, buffer, position);
-    store_value(item.end, buffer, position);
-    store_value(item.command.c_str(), buffer, position);
-    store_value(item.env.c_str(), buffer, position);
-    store_value(item.extdata.c_str(), buffer, position);
+    utility::store_value(item.guid.c_str(), buffer, position);
+    utility::store_value(item.node_id, buffer, position);
+    utility::store_value(item.parent_process_id, buffer, position);
+    utility::store_value(item.process_id, buffer, position);
+    utility::store_value(item.init, buffer, position);
+    utility::store_value(item.fini, buffer, position);
+    utility::store_value(item.start, buffer, position);
+    utility::store_value(item.end, buffer, position);
+    utility::store_value(item.command.c_str(), buffer, position);
+    utility::store_value(item.env.c_str(), buffer, position);
+    utility::store_value(item.extdata.c_str(), buffer, position);
 }
 
 template <>
 process_sample
-deserialize(uint8_t*& buffer)
+trace_cache::deserialize(uint8_t*& buffer)
 {
     process_sample result;
-    process_arg(buffer, result.guid);
-    process_arg(buffer, result.node_id);
-    process_arg(buffer, result.parent_process_id);
-    process_arg(buffer, result.process_id);
-    process_arg(buffer, result.init);
-    process_arg(buffer, result.fini);
-    process_arg(buffer, result.start);
-    process_arg(buffer, result.end);
-    process_arg(buffer, result.command);
-    process_arg(buffer, result.env);
-    process_arg(buffer, result.extdata);
+    utility::parse_value(buffer, result.guid);
+    utility::parse_value(buffer, result.node_id);
+    utility::parse_value(buffer, result.parent_process_id);
+    utility::parse_value(buffer, result.process_id);
+    utility::parse_value(buffer, result.init);
+    utility::parse_value(buffer, result.fini);
+    utility::parse_value(buffer, result.start);
+    utility::parse_value(buffer, result.end);
+    utility::parse_value(buffer, result.command);
+    utility::parse_value(buffer, result.env);
+    utility::parse_value(buffer, result.extdata);
     return result;
 }
 
-auto
-get_size(const process_sample& item)
+template <>
+size_t
+trace_cache::get_size(const process_sample& item)
 {
-    return get_size_helper(item.guid.c_str()) + get_size_helper(item.node_id) +
-           get_size_helper(item.parent_process_id) + get_size_helper(item.process_id) +
-           get_size_helper(item.init) + get_size_helper(item.fini) +
-           get_size_helper(item.start) + get_size_helper(item.end) +
-           get_size_helper(item.command.c_str()) + get_size_helper(item.env.c_str()) +
-           get_size_helper(item.extdata.c_str());
+    return utility::get_size_helper(item.guid.c_str()) +
+           utility::get_size_helper(item.node_id) +
+           utility::get_size_helper(item.parent_process_id) +
+           utility::get_size_helper(item.process_id) +
+           utility::get_size_helper(item.init) + utility::get_size_helper(item.fini) +
+           utility::get_size_helper(item.start) + utility::get_size_helper(item.end) +
+           utility::get_size_helper(item.command.c_str()) +
+           utility::get_size_helper(item.env.c_str()) +
+           utility::get_size_helper(item.extdata.c_str());
 }
 
 // ---------------- post processing ----------------
+struct handler_t
+{
+    virtual ~handler_t()                               = default;
+    virtual void handle_track(const track_sample&)     = 0;
+    virtual void handle_process(const process_sample&) = 0;
+};
+struct rocpd_format_handler_t : handler_t
+{
+    void handle_track(const track_sample& track) override
+    {
+        std::cout << track.track_name << std::endl;
+    };
+
+    void handle_process(const process_sample& process) override
+    {
+        std::cout << process.command << std::endl;
+    };
+};
+struct perfetto_format_handler_t : handler_t
+{
+    void handle_track(const track_sample&) override {
+
+    };
+
+    void handle_process(const process_sample&) override {
+
+    };
+};
 
 void
-execute_sample_processing(type_identifier_t type_identifier, const cacheable_t& value)
+execute_sample_processing(type_identifier_t               type_identifier,
+                          const trace_cache::cacheable_t& value)
 {
-    switch(type_identifier)
+    std::vector<std::unique_ptr<handler_t>> enabled_formats;
+    enabled_formats.push_back(std::make_unique<rocpd_format_handler_t>());
+
+    for(const auto& handler : enabled_formats)
     {
-        case type_identifier_t::track_sample:
+        switch(type_identifier)
         {
-            auto track = static_cast<const track_sample&>(value);
-            std::cout << "track sample:" << track.track_name << std::endl;
-            break;
+            case type_identifier_t::track_sample:
+            {
+                auto track = static_cast<const track_sample&>(value);
+                handler->handle_track(track);
+                break;
+            }
+            case type_identifier_t::process_sample:
+            {
+                auto process = static_cast<const process_sample&>(value);
+                handler->handle_process(process);
+                break;
+            }
+            default: break;
         }
-        case type_identifier_t::process_sample:
-        {
-            auto process = static_cast<const process_sample&>(value);
-            std::cout << "process sample:" << process.command << std::endl;
-            break;
-        }
-        default: break;
     }
 }
 
@@ -177,8 +219,10 @@ execute_sample_processing(type_identifier_t type_identifier, const cacheable_t& 
 void
 run_multithread_example()
 {
-    ::buffered_storage<flush_worker, type_identifier_t> buffered_storage;
-    const auto                                          number_of_iterations = 1000;
+    auto filepath = trace_cache::utility::get_buffered_storage_filename(0, 0);
+    trace_cache::buffered_storage<trace_cache::flush_worker, type_identifier_t>
+               buffered_storage(filepath, getpid());
+    const auto number_of_iterations = 1000;
 
     std::vector<std::thread> threads;
 
@@ -205,8 +249,7 @@ run_multithread_example()
         size_t count = 0;
         do
         {
-            process_sample ps;
-            ps.command = std::to_string(count);
+            process_sample ps("", 0, 0, 0, 0, 0, 0, 0, std::to_string(count), "", "");
             buffered_storage.store(ps);
             count++;
         } while(count != number_of_iterations);
@@ -219,8 +262,8 @@ run_multithread_example()
 
     buffered_storage.shutdown();
 
-    storage_parser<type_identifier_t, track_sample, process_sample> parser(
-        get_buffered_storage_filename(0, 0));
+    trace_cache::storage_parser<type_identifier_t, track_sample, process_sample> parser(
+        filepath);
 
     parser.load();
 }

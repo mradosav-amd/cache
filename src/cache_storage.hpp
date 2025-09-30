@@ -15,8 +15,12 @@
 #include <string.h>
 #include <thread>
 #include <type_traits>
+#include <unistd.h>
 
 #include "cacheable.hpp"
+
+namespace trace_cache
+{
 
 struct cache_buffer_t
 {
@@ -34,15 +38,19 @@ struct worker_synchronization_t
 
     std::condition_variable exit_finished_condition;
     bool                    exit_finished{ false };
+
+    pid_t origin_pid;
 };
 using worker_synchronization_ptr_t = std::shared_ptr<worker_synchronization_t>;
 
 struct flush_worker
 {
     explicit flush_worker(cache_buffer_ptr_t           cache_buffer_ptr,
-                          worker_synchronization_ptr_t worker_synchronization_ptr)
+                          worker_synchronization_ptr_t worker_synchronization_ptr,
+                          std::string                  filepath)
     : m_buffer_ptr(std::move(cache_buffer_ptr))
     , m_worker_synchronization(std::move(worker_synchronization_ptr))
+    , m_filepath(std::move(filepath))
     {}
 
     void execute_flush(std::ofstream& ofs, bool force = false)
@@ -84,13 +92,12 @@ struct flush_worker
 
     void operator()()
     {
-        auto          filepath = get_buffered_storage_filename(0, 0);
-        std::ofstream _ofs(filepath, std::ios::binary | std::ios::out);
+        std::ofstream _ofs(m_filepath, std::ios::binary | std::ios::out);
 
-        if(!_ofs)
+        if(!_ofs.good())
         {
             std::stringstream _ss;
-            _ss << "Error opening file for writing: " << filepath;
+            _ss << "Error opening file for writing: " << m_filepath;
             throw std::runtime_error(_ss.str());
         }
 
@@ -113,6 +120,7 @@ struct flush_worker
 private:
     cache_buffer_ptr_t           m_buffer_ptr;
     worker_synchronization_ptr_t m_worker_synchronization;
+    std::string                  m_filepath;
 };
 
 struct worker_factory
@@ -126,30 +134,47 @@ struct worker_factory
     template <typename WorkerType>
     static WorkerType get_worker(
         const cache_buffer_ptr_t&           cache_buffer_ptr,
-        const worker_synchronization_ptr_t& worker_synchronization_ptr)
+        const worker_synchronization_ptr_t& worker_synchronization_ptr,
+        std::string                         filepath)
     {
-        return WorkerType(cache_buffer_ptr, worker_synchronization_ptr);
-    };
+        return WorkerType(cache_buffer_ptr, worker_synchronization_ptr,
+                          std::move(filepath));
+    }
 };
 
 template <typename WorkerType, typename TypeIdentifierEnum>
 class buffered_storage
 {
-    static_assert(is_enum_class_v<TypeIdentifierEnum>,
+    static_assert(type_traits::is_enum_class_v<TypeIdentifierEnum>,
                   "TypeIdentifierEnum must be an enum class");
 
 public:
-    explicit buffered_storage()
-    : m_flushing_thread{ worker_factory::get_worker<WorkerType>(
-          m_cache_buffer_ptr, m_worker_synchronization) }
-    {}
+    explicit buffered_storage(std::string filepath, pid_t origin_pid)
+    : m_flushing_thread{ std::move(worker_factory::get_worker<WorkerType>(
+          m_cache_buffer_ptr, m_worker_synchronization, std::move(filepath))) }
+    {
+        m_worker_synchronization->origin_pid = origin_pid;
+    }
 
-    ~buffered_storage() { m_flushing_thread.detach(); }
+    ~buffered_storage()
+    {
+        if(getpid() == m_worker_synchronization->origin_pid)
+        {
+            m_flushing_thread.detach();
+        }
+    }
 
     template <typename Type>
     auto store(const Type& value)
     {
-        check_type<Type, TypeIdentifierEnum>();
+        if(!is_running())
+        {
+            throw std::runtime_error(
+                "Trying to use buffered storage while it is not running");
+            return;
+        }
+
+        type_traits::check_type<Type, TypeIdentifierEnum>();
 
         using TypeIdentifierEnumUderlayingType =
             std::underlying_type_t<TypeIdentifierEnum>;
@@ -161,16 +186,24 @@ public:
         auto   type_identifier_value =
             static_cast<TypeIdentifierEnumUderlayingType>(Type::type_identifier);
 
-        store_value(type_identifier_value, buf, position);
-        store_value(sample_size, buf, position);
+        utility::store_value(type_identifier_value, buf, position);
+        utility::store_value(sample_size, buf, position);
         serialize(buf + position, value);
     }
 
-    void shutdown()
+    void shutdown(pid_t current_pid = getpid())
     {
         std::cout << "Buffer storage shutting down.." << std::endl;
         m_worker_synchronization->is_running = false;
         m_worker_synchronization->is_running_condition.notify_all();
+
+        if(m_worker_synchronization->origin_pid != current_pid)
+        {
+            std::cout
+                << "Buffer storage is not created in same process as shutting down.."
+                << std::endl;
+            return;
+        }
 
         std::mutex       _exit_mutex;
         std::unique_lock _exit_lock{ _exit_mutex };
@@ -223,5 +256,6 @@ private:
 
     cache_buffer_ptr_t m_cache_buffer_ptr{ std::make_shared<cache_buffer_t>() };
     std::thread        m_flushing_thread;
-    pid_t              m_created_process;
 };
+
+}  // namespace trace_cache
