@@ -220,8 +220,10 @@ void
 run_multithread_example()
 {
     auto filepath = trace_cache::utility::get_buffered_storage_filename(0, 0);
-    trace_cache::buffered_storage<trace_cache::flush_worker, type_identifier_t>
-               buffered_storage(filepath, getpid());
+    trace_cache::buffered_storage<trace_cache::flush_factory_t, type_identifier_t>
+        buffered_storage(filepath);
+    buffered_storage.start();
+
     const auto number_of_iterations = 1000;
 
     std::vector<std::thread> threads;
