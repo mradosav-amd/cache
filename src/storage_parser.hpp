@@ -1,5 +1,6 @@
 #pragma once
 
+#include "cache_type_traits.hpp"
 #include "cacheable.hpp"
 #include "type_registry.hpp"
 #include <algorithm>
@@ -21,18 +22,18 @@
 namespace trace_cache
 {
 
-template <typename TypeIdentifierEnum>
-void
-execute_sample_processing(TypeIdentifierEnum type_identifier, const cacheable_t& value);
-
-using postprocessing_callback      = std::function<void(const cacheable_t&)>;
-using postprocessing_callback_list = std::vector<postprocessing_callback>;
-
-template <typename TypeIdentifierEnum, typename... SupportedTypes>
+template <typename TypeIdentifierEnum, typename TypeProcessing,
+          typename... SupportedTypes>
 class storage_parser
 {
     static_assert(type_traits::is_enum_class_v<TypeIdentifierEnum>,
                   "TypeIdentifierEnum must be an enum class");
+
+    static_assert(type_traits::has_execute_processing<TypeProcessing, TypeIdentifierEnum,
+                                                      cacheable_t>::value,
+                  "TypeProcessing must have proper execute processing function "
+                  "TypeProcessing::execute_sample_processing(TypeIdentifierEnum, const "
+                  "cacheable_t&)");
 
 public:
     storage_parser(std::string _filename)
@@ -97,12 +98,13 @@ public:
             auto sample_value = m_registry.get_type(header.type, data);
             if(sample_value.has_value())
             {
-                execute_sample_processing(header.type,
-                                          std::visit(
-                                              [](auto& arg) -> cacheable_t& {
-                                                  return static_cast<cacheable_t&>(arg);
-                                              },
-                                              sample_value.value()));
+                // std::cout << "prased has value" << std::endl;
+                TypeProcessing::execute_sample_processing(
+                    header.type, std::visit(
+                                     [](auto& arg) -> cacheable_t& {
+                                         return static_cast<cacheable_t&>(arg);
+                                     },
+                                     sample_value.value()));
             }
             else
             {

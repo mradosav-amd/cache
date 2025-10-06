@@ -19,17 +19,16 @@ if(ENABLE_COVERAGE)
     endif()
 endif()
 
-set(TEST_SOURCES
+set(UNIT_TEST_SOURCES
     test_type_registry.cpp
     test_cacheable.cpp
     test_cache_storage.cpp
     test_storage_parser.cpp
     test_flush_worker.cpp
-
-    # test_integration.cpp
+    test_cache_integration.cpp
 )
 
-add_executable(caching-lib-tests ${TEST_SOURCES})
+add_executable(caching-lib-tests ${UNIT_TEST_SOURCES})
 
 target_link_libraries(caching-lib-tests
     CachingLib::caching-lib
@@ -65,3 +64,7 @@ if(ENABLE_COVERAGE)
         )
     endif()
 endif()
+
+
+
+

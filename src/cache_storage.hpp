@@ -11,6 +11,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <ostream>
 #include <sstream>
 #include <stdexcept>
 #include <stdint.h>
@@ -24,12 +25,13 @@
 namespace trace_cache
 {
 
-using worker_function_t = std::function<void(std::ofstream&, bool)>;
+using ofs_t             = std::basic_ostream<char>;
+using worker_function_t = std::function<void(ofs_t& ofs, bool force)>;
 
 struct worker_synchronization_t
 {
     std::condition_variable is_running_condition;
-    bool                    is_running{ true };
+    bool                    is_running{ false };
 
     std::condition_variable exit_finished_condition;
     bool                    exit_finished{ false };
@@ -51,29 +53,31 @@ struct flush_worker_t
 
     void start(const pid_t& current_pid)
     {
+        m_ofs = std::ofstream{ m_filepath, std::ios::binary | std::ios::out };
+
+        if(!m_ofs.good())
+        {
+            std::stringstream _ss;
+            _ss << "Error opening file for writing: " << m_filepath;
+            throw std::runtime_error(_ss.str());
+        }
+
         m_worker_synchronization->origin_pid = current_pid;
-        m_flushing_thread                    = std::make_unique<std::thread>([&]() {
-            std::ofstream _ofs(m_filepath, std::ios::binary | std::ios::out);
+        m_worker_synchronization->is_running = true;
 
-            if(!_ofs.good())
-            {
-                std::stringstream _ss;
-                _ss << "Error opening file for writing: " << m_filepath;
-                throw std::runtime_error(_ss.str());
-            }
-
+        m_flushing_thread = std::make_unique<std::thread>([&]() {
             std::mutex _shutdown_condition_mutex;
             while(m_worker_synchronization->is_running)
             {
-                m_worker_function(_ofs, false);
+                m_worker_function(m_ofs, false);
                 std::unique_lock _lock{ _shutdown_condition_mutex };
                 m_worker_synchronization->is_running_condition.wait_for(
                     _lock, std::chrono::milliseconds(CACHE_FILE_FLUSH_TIMEOUT),
                     [&]() { return !m_worker_synchronization->is_running; });
             }
 
-            m_worker_function(_ofs, true);
-            _ofs.close();
+            m_worker_function(m_ofs, true);
+            m_ofs.close();
             m_worker_synchronization->exit_finished = true;
             m_worker_synchronization->exit_finished_condition.notify_one();
         });
@@ -84,17 +88,16 @@ struct flush_worker_t
         const bool flushing_thread_exist = m_flushing_thread != nullptr;
         const bool worker_is_running =
             m_worker_synchronization != nullptr && m_worker_synchronization->is_running;
-        const bool thread_is_created_in_this_process =
-            current_pid == m_worker_synchronization->origin_pid;
 
-        if(flushing_thread_exist && worker_is_running &&
-           thread_is_created_in_this_process)
+        if(flushing_thread_exist && worker_is_running)
         {
             std::cout << "Buffer storage shutting down.." << std::endl;
             m_worker_synchronization->is_running = false;
             m_worker_synchronization->is_running_condition.notify_all();
 
-            if(m_worker_synchronization->origin_pid != current_pid)
+            const bool thread_is_created_in_this_process =
+                current_pid == m_worker_synchronization->origin_pid;
+            if(!thread_is_created_in_this_process)
             {
                 std::cout
                     << "Buffer storage is not created in same process as shutting down.."
@@ -119,18 +122,19 @@ private:
     worker_function_t            m_worker_function;
     worker_synchronization_ptr_t m_worker_synchronization;
     std::string                  m_filepath;
+    std::ofstream                m_ofs;
     std::unique_ptr<std::thread> m_flushing_thread;
 };
 
-struct flush_factory_t
+struct flush_worker_factory_t
 {
     using worker_t = flush_worker_t;
 
-    flush_factory_t()                             = delete;
-    flush_factory_t(flush_factory_t&)             = delete;
-    flush_factory_t& operator=(flush_factory_t&)  = delete;
-    flush_factory_t(flush_factory_t&&)            = delete;
-    flush_factory_t& operator=(flush_factory_t&&) = delete;
+    flush_worker_factory_t()                                    = delete;
+    flush_worker_factory_t(flush_worker_factory_t&)             = delete;
+    flush_worker_factory_t& operator=(flush_worker_factory_t&)  = delete;
+    flush_worker_factory_t(flush_worker_factory_t&&)            = delete;
+    flush_worker_factory_t& operator=(flush_worker_factory_t&&) = delete;
 
     static std::shared_ptr<worker_t> get_worker(
         worker_function_t                   worker_function,
@@ -151,7 +155,7 @@ class buffered_storage
 public:
     explicit buffered_storage(std::string filepath)
     : m_worker{ std::move(WorkerFactory::get_worker(
-          [this](std::ofstream& ofs, bool force) { execute_flush(ofs, force); },
+          [this](ofs_t& ofs, bool force) { execute_flush(ofs, force); },
           m_worker_synchronization, std::move(filepath))) }
     {}
 
@@ -162,6 +166,10 @@ public:
         if(m_worker == nullptr)
         {
             throw std::runtime_error("Worker is null unable to start buffered storage.");
+        }
+        if(m_worker_synchronization && m_worker_synchronization->is_running)
+        {
+            return;
         }
 
         m_worker->start(current_pid);
@@ -210,7 +218,7 @@ public:
     }
 
 private:
-    void execute_flush(std::ofstream& ofs, bool force)
+    void execute_flush(ofs_t& ofs, bool force)
     {
         size_t _head, _tail;
         {

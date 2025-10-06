@@ -114,16 +114,30 @@ struct has_get_size<T, void_t<decltype(get_size(std::declval<const T&>()))>>
 : std::true_type
 {};
 
-template <typename Tp, typename TypeIdentifierEnum>
+template <typename T, typename TypeIdentifierEnum>
 void
 check_type()
 {
-    static_assert(has_serialize<Tp>::value, "Type don't have `serialize` function.");
-    static_assert(has_deserialize<Tp>::value, "Type don't have `deserialize` function.");
-    static_assert(has_get_size<Tp>::value, "Type don't have `get_size` function.");
-    static_assert(has_type_identifier<Tp, TypeIdentifierEnum>::value,
+    static_assert(has_serialize<T>::value, "Type don't have `serialize` function.");
+    static_assert(has_deserialize<T>::value, "Type don't have `deserialize` function.");
+    static_assert(has_get_size<T>::value, "Type don't have `get_size` function.");
+    static_assert(has_type_identifier<T, TypeIdentifierEnum>::value,
                   "Type don't have `type_identifier` member with correct type.");
 }
+
+template <typename T, typename TypeIdentifierEnum, typename CacheableType,
+          typename = void>
+struct has_execute_processing : std::false_type
+{};
+
+template <typename T, typename TypeIdentifierEnum, typename CacheableType>
+struct has_execute_processing<
+    T, TypeIdentifierEnum, CacheableType,
+    void_t<decltype(T::execute_sample_processing(std::declval<TypeIdentifierEnum>(),
+                                                 std::declval<const CacheableType&>()))>>
+: std::bool_constant<std::is_void_v<decltype(T::execute_sample_processing(
+      std::declval<TypeIdentifierEnum>(), std::declval<const CacheableType&>()))>>
+{};
 
 }  // namespace type_traits
 }  // namespace trace_cache

@@ -7,7 +7,7 @@
 class TypeRegistryTest : public ::testing::Test
 {
 protected:
-    trace_cache::type_registry<test_type_identifier, test_sample_1, test_sample_2>
+    trace_cache::type_registry<test_type_identifier_t, test_sample_1, test_sample_2>
         type_registry;
 };
 
@@ -20,7 +20,7 @@ TEST_F(TypeRegistryTest, test_get_type_sample_1)
 
     auto buffer_data = buffer.data();
     auto result =
-        type_registry.get_type(test_type_identifier::sample_type_1, buffer_data);
+        type_registry.get_type(test_type_identifier_t::sample_type_1, buffer_data);
 
     ASSERT_TRUE(result.has_value());
     ASSERT_TRUE(std::holds_alternative<test_sample_1>(result.value()));
@@ -39,7 +39,7 @@ TEST_F(TypeRegistryTest, test_get_type_sample_2)
 
     auto buffer_data = buffer.data();
     auto result =
-        type_registry.get_type(test_type_identifier::sample_type_2, buffer_data);
+        type_registry.get_type(test_type_identifier_t::sample_type_2, buffer_data);
 
     ASSERT_TRUE(result.has_value());
     ASSERT_TRUE(std::holds_alternative<test_sample_2>(result.value()));
@@ -54,7 +54,7 @@ TEST_F(TypeRegistryTest, test_get_type_unknown_id)
     uint8_t  dummy_data = 0;
     uint8_t* data       = &dummy_data;
 
-    auto result = type_registry.get_type(test_type_identifier::fragmented_space, data);
+    auto result = type_registry.get_type(test_type_identifier_t::fragmented_space, data);
 
     EXPECT_FALSE(result.has_value());
 }
@@ -62,8 +62,9 @@ TEST_F(TypeRegistryTest, test_get_type_unknown_id)
 TEST_F(TypeRegistryTest, test_variant_type_definition)
 {
     using expected_variant = std::variant<test_sample_1, test_sample_2>;
-    using actual_variant = trace_cache::type_registry<test_type_identifier, test_sample_1,
-                                                      test_sample_2>::variant_t;
+    using actual_variant =
+        trace_cache::type_registry<test_type_identifier_t, test_sample_1,
+                                   test_sample_2>::variant_t;
 
     EXPECT_TRUE((std::is_same_v<expected_variant, actual_variant>) );
 }
@@ -86,9 +87,9 @@ TEST_F(TypeRegistryTest, test_multiple_calls_same_type)
     auto buffer2_data = buffer2.data();
 
     auto result1 =
-        type_registry.get_type(test_type_identifier::sample_type_1, buffer1_data);
+        type_registry.get_type(test_type_identifier_t::sample_type_1, buffer1_data);
     auto result2 =
-        type_registry.get_type(test_type_identifier::sample_type_1, buffer2_data);
+        type_registry.get_type(test_type_identifier_t::sample_type_1, buffer2_data);
 
     ASSERT_TRUE(result1.has_value());
     ASSERT_TRUE(result2.has_value());

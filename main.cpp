@@ -186,33 +186,36 @@ struct perfetto_format_handler_t : handler_t
     };
 };
 
-void
-execute_sample_processing(type_identifier_t               type_identifier,
-                          const trace_cache::cacheable_t& value)
+struct type_processing_t
 {
-    std::vector<std::unique_ptr<handler_t>> enabled_formats;
-    enabled_formats.push_back(std::make_unique<rocpd_format_handler_t>());
-
-    for(const auto& handler : enabled_formats)
+    static void execute_sample_processing(type_identifier_t               type_identifier,
+                                          const trace_cache::cacheable_t& value)
     {
-        switch(type_identifier)
+        std::vector<std::unique_ptr<handler_t>> enabled_formats;
+        enabled_formats.push_back(std::make_unique<rocpd_format_handler_t>());
+
+        std::cout << "calling execute" << std::endl;
+        for(const auto& handler : enabled_formats)
         {
-            case type_identifier_t::track_sample:
+            switch(type_identifier)
             {
-                auto track = static_cast<const track_sample&>(value);
-                handler->handle_track(track);
-                break;
+                case type_identifier_t::track_sample:
+                {
+                    auto track = static_cast<const track_sample&>(value);
+                    handler->handle_track(track);
+                    break;
+                }
+                case type_identifier_t::process_sample:
+                {
+                    auto process = static_cast<const process_sample&>(value);
+                    handler->handle_process(process);
+                    break;
+                }
+                default: break;
             }
-            case type_identifier_t::process_sample:
-            {
-                auto process = static_cast<const process_sample&>(value);
-                handler->handle_process(process);
-                break;
-            }
-            default: break;
         }
     }
-}
+};
 
 // ---------------- Example ----------------
 
@@ -220,7 +223,7 @@ void
 run_multithread_example()
 {
     auto filepath = trace_cache::utility::get_buffered_storage_filename(0, 0);
-    trace_cache::buffered_storage<trace_cache::flush_factory_t, type_identifier_t>
+    trace_cache::buffered_storage<trace_cache::flush_worker_factory_t, type_identifier_t>
         buffered_storage(filepath);
     buffered_storage.start();
 
@@ -264,8 +267,9 @@ run_multithread_example()
 
     buffered_storage.shutdown();
 
-    trace_cache::storage_parser<type_identifier_t, track_sample, process_sample> parser(
-        filepath);
+    trace_cache::storage_parser<type_identifier_t, type_processing_t, track_sample,
+                                process_sample>
+        parser(filepath);
 
     parser.load();
 }

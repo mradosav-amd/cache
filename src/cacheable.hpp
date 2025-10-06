@@ -21,7 +21,7 @@ constexpr auto   KByte                    = 1024;
 constexpr auto   MByte                    = 1024 * 1024;
 constexpr size_t buffer_size              = 100 * MByte;
 constexpr size_t flush_threshold          = 80 * MByte;
-constexpr auto   CACHE_FILE_FLUSH_TIMEOUT = 10 * 1000;  // ms
+constexpr auto   CACHE_FILE_FLUSH_TIMEOUT = 10;  // ms
 
 template <typename TypeIdentifierEnum>
 constexpr size_t header_size = sizeof(TypeIdentifierEnum) + sizeof(size_t);

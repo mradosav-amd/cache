@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <vector>
 
-enum class test_type_identifier : uint32_t
+enum class test_type_identifier_t : uint32_t
 {
     sample_type_1    = 1,
     sample_type_2    = 2,
@@ -13,8 +13,8 @@ enum class test_type_identifier : uint32_t
 };
 struct test_sample_1 : public trace_cache::cacheable_t
 {
-    static constexpr test_type_identifier type_identifier =
-        test_type_identifier::sample_type_1;
+    static constexpr test_type_identifier_t type_identifier =
+        test_type_identifier_t::sample_type_1;
 
     test_sample_1() = default;
     test_sample_1(int v, std::string s)
@@ -33,8 +33,8 @@ struct test_sample_1 : public trace_cache::cacheable_t
 
 struct test_sample_2 : public trace_cache::cacheable_t
 {
-    static constexpr test_type_identifier type_identifier =
-        test_type_identifier::sample_type_2;
+    static constexpr test_type_identifier_t type_identifier =
+        test_type_identifier_t::sample_type_2;
 
     test_sample_2() = default;
     test_sample_2(double d, uint32_t id)
@@ -53,8 +53,8 @@ struct test_sample_2 : public trace_cache::cacheable_t
 
 struct test_sample_3 : public trace_cache::cacheable_t
 {
-    static constexpr test_type_identifier type_identifier =
-        test_type_identifier::sample_type_3;
+    static constexpr test_type_identifier_t type_identifier =
+        test_type_identifier_t::sample_type_3;
 
     test_sample_3() = default;
     test_sample_3(std::vector<uint8_t> p)

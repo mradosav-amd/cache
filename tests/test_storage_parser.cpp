@@ -40,45 +40,46 @@ struct processing_tracker
 
 static processing_tracker g_tracker;
 
-template <>
-void
-trace_cache::execute_sample_processing(test_type_identifier            type_identifier,
-                                       const trace_cache::cacheable_t& value)
+struct sample_processor_t
 {
-    switch(type_identifier)
+    static void execute_sample_processing(test_type_identifier_t          type_identifier,
+                                          const trace_cache::cacheable_t& value)
     {
-        case test_type_identifier::sample_type_1:
+        switch(type_identifier)
         {
-            const auto& sample = static_cast<const test_sample_1&>(value);
-            g_tracker.sample_1_count++;
-            std::lock_guard<std::mutex> lock(g_tracker.data_mutex);
-            g_tracker.processed_sample_1.push_back(sample);
-            break;
+            case test_type_identifier_t::sample_type_1:
+            {
+                const auto& sample = static_cast<const test_sample_1&>(value);
+                g_tracker.sample_1_count++;
+                std::lock_guard<std::mutex> lock(g_tracker.data_mutex);
+                g_tracker.processed_sample_1.push_back(sample);
+                break;
+            }
+            case test_type_identifier_t::sample_type_2:
+            {
+                const auto& sample = static_cast<const test_sample_2&>(value);
+                g_tracker.sample_2_count++;
+                std::lock_guard<std::mutex> lock(g_tracker.data_mutex);
+                g_tracker.processed_sample_2.push_back(sample);
+                break;
+            }
+            case test_type_identifier_t::sample_type_3:
+            {
+                const auto& sample = static_cast<const test_sample_3&>(value);
+                g_tracker.sample_3_count++;
+                std::lock_guard<std::mutex> lock(g_tracker.data_mutex);
+                g_tracker.processed_sample_3.push_back(sample);
+                break;
+            }
+            default: g_tracker.unknown_count++; break;
         }
-        case test_type_identifier::sample_type_2:
-        {
-            const auto& sample = static_cast<const test_sample_2&>(value);
-            g_tracker.sample_2_count++;
-            std::lock_guard<std::mutex> lock(g_tracker.data_mutex);
-            g_tracker.processed_sample_2.push_back(sample);
-            break;
-        }
-        case test_type_identifier::sample_type_3:
-        {
-            const auto& sample = static_cast<const test_sample_3&>(value);
-            g_tracker.sample_3_count++;
-            std::lock_guard<std::mutex> lock(g_tracker.data_mutex);
-            g_tracker.processed_sample_3.push_back(sample);
-            break;
-        }
-        default: g_tracker.unknown_count++; break;
     }
-}
+};
 
 struct __attribute__((packed)) sample_header
 {
-    test_type_identifier type;
-    size_t               sample_size;
+    test_type_identifier_t type;
+    size_t                 sample_size;
 };
 
 class StorageParserTest : public ::testing::Test
@@ -101,7 +102,7 @@ protected:
 
     template <typename T>
     void write_vector(std::ofstream& ofs, const std::vector<T>& vec,
-                      test_type_identifier identifier)
+                      test_type_identifier_t identifier)
     {
         for(const auto& sample : vec)
         {
@@ -124,9 +125,9 @@ protected:
         std::ofstream ofs(test_file_path, std::ios::binary);
         ASSERT_TRUE(ofs.is_open());
 
-        write_vector(ofs, samples_1, test_type_identifier::sample_type_1);
-        write_vector(ofs, samples_2, test_type_identifier::sample_type_2);
-        write_vector(ofs, samples_3, test_type_identifier::sample_type_3);
+        write_vector(ofs, samples_1, test_type_identifier_t::sample_type_1);
+        write_vector(ofs, samples_2, test_type_identifier_t::sample_type_2);
+        write_vector(ofs, samples_3, test_type_identifier_t::sample_type_3);
 
         ofs.close();
     }
@@ -142,8 +143,8 @@ TEST_F(StorageParserTest, LoadEmptyFile)
     std::ofstream ofs(test_file_path, std::ios::binary);
     ofs.close();
 
-    trace_cache::storage_parser<test_type_identifier, test_sample_1, test_sample_2,
-                                test_sample_3>
+    trace_cache::storage_parser<test_type_identifier_t, sample_processor_t, test_sample_1,
+                                test_sample_2, test_sample_3>
         parser(test_file_path);
 
     EXPECT_NO_THROW(parser.load());
@@ -162,8 +163,8 @@ TEST_F(StorageParserTest, LoadSingleSampleType1)
 
     create_test_file_with_samples(samples_1, {}, {});
 
-    trace_cache::storage_parser<test_type_identifier, test_sample_1, test_sample_2,
-                                test_sample_3>
+    trace_cache::storage_parser<test_type_identifier_t, sample_processor_t, test_sample_1,
+                                test_sample_2, test_sample_3>
         parser(test_file_path);
 
     EXPECT_NO_THROW(parser.load());
@@ -191,8 +192,8 @@ TEST_F(StorageParserTest, LoadMultipleSampleTypes)
 
     create_test_file_with_samples(samples_1, samples_2, samples_3);
 
-    trace_cache::storage_parser<test_type_identifier, test_sample_1, test_sample_2,
-                                test_sample_3>
+    trace_cache::storage_parser<test_type_identifier_t, sample_processor_t, test_sample_1,
+                                test_sample_2, test_sample_3>
         parser(test_file_path);
 
     EXPECT_NO_THROW(parser.load());
@@ -221,7 +222,8 @@ TEST_F(StorageParserTest, LoadUnsupportedSampleType)
 
     create_test_file_with_samples(samples_1, samples_2, samples_3);
 
-    trace_cache::storage_parser<test_type_identifier, test_sample_1, test_sample_2>
+    trace_cache::storage_parser<test_type_identifier_t, sample_processor_t, test_sample_1,
+                                test_sample_2>
         parser(test_file_path);
 
     EXPECT_NO_THROW(parser.load());
@@ -246,14 +248,14 @@ TEST_F(StorageParserTest, LoadFileWithZeroSizedSamples)
         std::ofstream ofs(test_file_path, std::ios::binary);
 
         sample_header zero_header;
-        zero_header.type        = test_type_identifier::sample_type_1;
+        zero_header.type        = test_type_identifier_t::sample_type_1;
         zero_header.sample_size = 0;
 
         ofs.write(reinterpret_cast<const char*>(&zero_header), sizeof(zero_header));
         ofs.write(reinterpret_cast<const char*>(&zero_header), sizeof(zero_header));
 
         sample_header valid_header;
-        valid_header.type        = test_type_identifier::sample_type_1;
+        valid_header.type        = test_type_identifier_t::sample_type_1;
         valid_header.sample_size = trace_cache::get_size(valid_sample);
 
         ofs.write(reinterpret_cast<const char*>(&valid_header), sizeof(valid_header));
@@ -265,8 +267,8 @@ TEST_F(StorageParserTest, LoadFileWithZeroSizedSamples)
         ofs.close();
     }
 
-    trace_cache::storage_parser<test_type_identifier, test_sample_1, test_sample_2,
-                                test_sample_3>
+    trace_cache::storage_parser<test_type_identifier_t, sample_processor_t, test_sample_1,
+                                test_sample_2, test_sample_3>
         parser(test_file_path);
 
     EXPECT_NO_THROW(parser.load());
@@ -279,8 +281,8 @@ TEST_F(StorageParserTest, LoadFileWithZeroSizedSamples)
 
 TEST_F(StorageParserTest, LoadNonExistentFile)
 {
-    trace_cache::storage_parser<test_type_identifier, test_sample_1, test_sample_2,
-                                test_sample_3>
+    trace_cache::storage_parser<test_type_identifier_t, sample_processor_t, test_sample_1,
+                                test_sample_2, test_sample_3>
         parser("non_existent_file.bin");
 
     EXPECT_THROW(parser.load(), std::runtime_error);
@@ -296,8 +298,8 @@ TEST_F(StorageParserTest, FinishedCallbackRegistrationAndExecution)
     auto callback        = std::make_unique<std::function<void()>>(
         [&callback_called]() { callback_called = true; });
 
-    trace_cache::storage_parser<test_type_identifier, test_sample_1, test_sample_2,
-                                test_sample_3>
+    trace_cache::storage_parser<test_type_identifier_t, sample_processor_t, test_sample_1,
+                                test_sample_2, test_sample_3>
         parser(test_file_path);
 
     parser.register_on_finished_callback(std::move(callback));
@@ -315,8 +317,8 @@ TEST_F(StorageParserTest, LoadWithoutFinishedCallback)
 
     create_test_file_with_samples({}, samples_2, {});
 
-    trace_cache::storage_parser<test_type_identifier, test_sample_1, test_sample_2,
-                                test_sample_3>
+    trace_cache::storage_parser<test_type_identifier_t, sample_processor_t, test_sample_1,
+                                test_sample_2, test_sample_3>
         parser(test_file_path);
 
     // Don't register callback
@@ -335,8 +337,8 @@ TEST_F(StorageParserTest, LoadLargeSampleData)
 
     create_test_file_with_samples({}, {}, samples_3);
 
-    trace_cache::storage_parser<test_type_identifier, test_sample_1, test_sample_2,
-                                test_sample_3>
+    trace_cache::storage_parser<test_type_identifier_t, sample_processor_t, test_sample_1,
+                                test_sample_2, test_sample_3>
         parser(test_file_path);
 
     EXPECT_NO_THROW(parser.load());
@@ -359,8 +361,8 @@ TEST_F(StorageParserTest, LoadManySmallSamples)
 
     create_test_file_with_samples(many_samples, {}, {});
 
-    trace_cache::storage_parser<test_type_identifier, test_sample_1, test_sample_2,
-                                test_sample_3>
+    trace_cache::storage_parser<test_type_identifier_t, sample_processor_t, test_sample_1,
+                                test_sample_2, test_sample_3>
         parser(test_file_path);
 
     EXPECT_NO_THROW(parser.load());
@@ -383,7 +385,7 @@ TEST_F(StorageParserTest, WriteLessThanExpected)
     std::ofstream ofs(test_file_path, std::ios::binary);
 
     sample_header header;
-    header.type        = test_type_identifier::sample_type_1;
+    header.type        = test_type_identifier_t::sample_type_1;
     header.sample_size = 100;
 
     ofs.write(reinterpret_cast<const char*>(&header), sizeof(header));
@@ -393,8 +395,8 @@ TEST_F(StorageParserTest, WriteLessThanExpected)
 
     ofs.close();
 
-    trace_cache::storage_parser<test_type_identifier, test_sample_1, test_sample_2,
-                                test_sample_3>
+    trace_cache::storage_parser<test_type_identifier_t, sample_processor_t, test_sample_1,
+                                test_sample_2, test_sample_3>
         parser(test_file_path);
 
     EXPECT_NO_THROW(parser.load());
@@ -416,11 +418,11 @@ TEST_F(StorageParserTest, ReadFragmentedSpace)
     {
         std::ofstream ofs(test_file_path, std::ios::binary);
 
-        write_vector(ofs, samples_1, test_type_identifier::sample_type_1);
+        write_vector(ofs, samples_1, test_type_identifier_t::sample_type_1);
 
         sample_header header;
         header.sample_size = 100;
-        header.type        = test_type_identifier::fragmented_space;
+        header.type        = test_type_identifier_t::fragmented_space;
         std::vector<uint8_t> fragmented_space;
         fragmented_space.reserve(header.sample_size);
         fragmented_space.assign(header.sample_size, 0);
@@ -429,14 +431,14 @@ TEST_F(StorageParserTest, ReadFragmentedSpace)
         ofs.write(reinterpret_cast<const char*>(fragmented_space.data()),
                   header.sample_size);
 
-        write_vector(ofs, samples_2, test_type_identifier::sample_type_2);
-        write_vector(ofs, samples_3, test_type_identifier::sample_type_3);
+        write_vector(ofs, samples_2, test_type_identifier_t::sample_type_2);
+        write_vector(ofs, samples_3, test_type_identifier_t::sample_type_3);
 
         ofs.close();
     }
 
-    trace_cache::storage_parser<test_type_identifier, test_sample_1, test_sample_2,
-                                test_sample_3>
+    trace_cache::storage_parser<test_type_identifier_t, sample_processor_t, test_sample_1,
+                                test_sample_2, test_sample_3>
         parser(test_file_path);
 
     EXPECT_NO_THROW(parser.load());
