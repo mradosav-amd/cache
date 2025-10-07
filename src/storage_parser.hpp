@@ -116,7 +116,7 @@ public:
 
         ifs.close();
         std::cout << "File parsing finished. Removing " << m_filename
-                  << "from file system." << std::endl;
+                  << " from file system." << std::endl;
         std::remove(m_filename.c_str());
 
         if(m_on_finished_callback != nullptr)

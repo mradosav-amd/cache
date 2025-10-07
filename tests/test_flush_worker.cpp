@@ -1,17 +1,10 @@
 #include "cache_storage.hpp"
-#include "cacheable.hpp"
-#include "mocked_types.hpp"
 
-#include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <filesystem>
-#include <fstream>
 #include <gtest/gtest.h>
-#include <random>
 #include <stdexcept>
 #include <thread>
-#include <vector>
 
 class FlushWorkerTest : public ::testing::Test
 {
@@ -33,7 +26,7 @@ protected:
 
 std::atomic<int> FlushWorkerTest::test_counter{ 0 };
 
-TEST_F(FlushWorkerTest, StartWorkerSetsCorrectState)
+TEST_F(FlushWorkerTest, start_worker_in_correct_state)
 {
     bool worker_called   = false;
     auto worker_function = [&](trace_cache::ofs_t&, bool) { worker_called = true; };
@@ -51,7 +44,7 @@ TEST_F(FlushWorkerTest, StartWorkerSetsCorrectState)
     worker.stop(current_pid);
 }
 
-TEST_F(FlushWorkerTest, StopWorkerCompletesCleanly)
+TEST_F(FlushWorkerTest, stop_worker_complete)
 {
     std::atomic<bool> worker_called{ false };
     auto worker_function = [&](trace_cache::ofs_t&, bool) { worker_called = true; };
@@ -69,7 +62,7 @@ TEST_F(FlushWorkerTest, StopWorkerCompletesCleanly)
     EXPECT_TRUE(worker_called);
 }
 
-TEST_F(FlushWorkerTest, WorkerFunctionCalledOnStop)
+TEST_F(FlushWorkerTest, worker_function_called_on_stop)
 {
     std::atomic<int>  call_count{ 0 };
     std::atomic<bool> force_flag{ false };
@@ -89,7 +82,7 @@ TEST_F(FlushWorkerTest, WorkerFunctionCalledOnStop)
     EXPECT_TRUE(force_flag);
 }
 
-TEST_F(FlushWorkerTest, MultipleStopCallsAreSafe)
+TEST_F(FlushWorkerTest, multiple_stop_calls_are_safe)
 {
     auto worker_function = [](trace_cache::ofs_t&, bool) {};
 
@@ -107,7 +100,7 @@ TEST_F(FlushWorkerTest, MultipleStopCallsAreSafe)
     EXPECT_FALSE(worker_sync->is_running);
 }
 
-TEST_F(FlushWorkerTest, WorkerFactoryCreatesValidWorker)
+TEST_F(FlushWorkerTest, worker_factory_creates_valid_object)
 {
     auto worker_function = [](trace_cache::ofs_t&, bool) {};
 
@@ -118,7 +111,7 @@ TEST_F(FlushWorkerTest, WorkerFactoryCreatesValidWorker)
     EXPECT_EQ(typeid(*worker), typeid(trace_cache::flush_worker_t));
 }
 
-TEST_F(FlushWorkerTest, WorkerHandlesInvalidFilePath)
+TEST_F(FlushWorkerTest, worker_handles_invalid_path)
 {
     auto        worker_function = [](trace_cache::ofs_t&, bool) {};
     std::string invalid_path    = "/invalid/path/file.bin";
@@ -134,7 +127,7 @@ TEST_F(FlushWorkerTest, WorkerHandlesInvalidFilePath)
     EXPECT_FALSE(worker_sync->is_running);
 }
 
-TEST_F(FlushWorkerTest, DifferentPidStartStopWithFork)
+TEST_F(FlushWorkerTest, different_pid_start_stop)
 {
     std::atomic<bool> worker_called{ false };
     auto worker_function = [&](trace_cache::ofs_t&, bool) { worker_called = true; };

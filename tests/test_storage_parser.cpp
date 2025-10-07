@@ -1,6 +1,5 @@
-#include "cacheable.hpp"
+#include "mocked_types.hpp"
 #include "storage_parser.hpp"
-#include "type_registry.hpp"
 
 #include <atomic>
 #include <cstddef>
@@ -9,8 +8,6 @@
 #include <gtest/gtest.h>
 #include <numeric>
 #include <vector>
-
-#include "mocked_types.hpp"
 
 struct processing_tracker
 {
@@ -138,7 +135,7 @@ protected:
 
 std::atomic<int> StorageParserTest::test_counter{ 0 };
 
-TEST_F(StorageParserTest, LoadEmptyFile)
+TEST_F(StorageParserTest, load_empty_file)
 {
     std::ofstream ofs(test_file_path, std::ios::binary);
     ofs.close();
@@ -156,7 +153,7 @@ TEST_F(StorageParserTest, LoadEmptyFile)
     EXPECT_FALSE(std::filesystem::exists(test_file_path));
 }
 
-TEST_F(StorageParserTest, LoadSingleSampleType1)
+TEST_F(StorageParserTest, load_single_sample_type_1)
 {
     std::vector<test_sample_1> samples_1 = { test_sample_1(42, "test_string"),
                                              test_sample_1(100, "another_test") };
@@ -181,7 +178,7 @@ TEST_F(StorageParserTest, LoadSingleSampleType1)
     EXPECT_NE(std::remove(test_file_path.c_str()), 0);
 }
 
-TEST_F(StorageParserTest, LoadMultipleSampleTypes)
+TEST_F(StorageParserTest, load_multiple_sample_types)
 {
     std::vector<test_sample_1> samples_1 = { test_sample_1(123, "mixed_test") };
 
@@ -211,7 +208,7 @@ TEST_F(StorageParserTest, LoadMultipleSampleTypes)
     EXPECT_NE(std::remove(test_file_path.c_str()), 0);
 }
 
-TEST_F(StorageParserTest, LoadUnsupportedSampleType)
+TEST_F(StorageParserTest, load_unsupported_sample_type)
 {
     std::vector<test_sample_1> samples_1 = { test_sample_1(123, "mixed_test") };
 
@@ -240,7 +237,7 @@ TEST_F(StorageParserTest, LoadUnsupportedSampleType)
     EXPECT_NE(std::remove(test_file_path.c_str()), 0);
 }
 
-TEST_F(StorageParserTest, LoadFileWithZeroSizedSamples)
+TEST_F(StorageParserTest, load_file_with_zero_sized_samples)
 {
     // Prepare test
     test_sample_1 valid_sample(42, "valid");
@@ -279,7 +276,7 @@ TEST_F(StorageParserTest, LoadFileWithZeroSizedSamples)
     EXPECT_NE(std::remove(test_file_path.c_str()), 0);
 }
 
-TEST_F(StorageParserTest, LoadNonExistentFile)
+TEST_F(StorageParserTest, load_nonexisting_file)
 {
     trace_cache::storage_parser<test_type_identifier_t, sample_processor_t, test_sample_1,
                                 test_sample_2, test_sample_3>
@@ -311,7 +308,7 @@ TEST_F(StorageParserTest, FinishedCallbackRegistrationAndExecution)
     EXPECT_NE(std::remove(test_file_path.c_str()), 0);
 }
 
-TEST_F(StorageParserTest, LoadWithoutFinishedCallback)
+TEST_F(StorageParserTest, load_without_finished_callback)
 {
     std::vector<test_sample_2> samples_2 = { test_sample_2(9.87, 321) };
 
@@ -328,7 +325,7 @@ TEST_F(StorageParserTest, LoadWithoutFinishedCallback)
     EXPECT_NE(std::remove(test_file_path.c_str()), 0);
 }
 
-TEST_F(StorageParserTest, LoadLargeSampleData)
+TEST_F(StorageParserTest, load_large_sample_data)
 {
     std::vector<uint8_t> large_payload(10000);
     std::iota(large_payload.begin(), large_payload.end(), 0);
@@ -351,7 +348,7 @@ TEST_F(StorageParserTest, LoadLargeSampleData)
     EXPECT_NE(std::remove(test_file_path.c_str()), 0);
 }
 
-TEST_F(StorageParserTest, LoadManySmallSamples)
+TEST_F(StorageParserTest, load_many_small_samples)
 {
     std::vector<test_sample_1> many_samples;
     for(int i = 0; i < 1000; ++i)
@@ -380,7 +377,7 @@ TEST_F(StorageParserTest, LoadManySmallSamples)
     EXPECT_NE(std::remove(test_file_path.c_str()), 0);
 }
 
-TEST_F(StorageParserTest, WriteLessThanExpected)
+TEST_F(StorageParserTest, write_less_than_expected)
 {
     std::ofstream ofs(test_file_path, std::ios::binary);
 
@@ -408,7 +405,7 @@ TEST_F(StorageParserTest, WriteLessThanExpected)
     EXPECT_NE(std::remove(test_file_path.c_str()), 0);
 }
 
-TEST_F(StorageParserTest, ReadFragmentedSpace)
+TEST_F(StorageParserTest, read_fragmented_space)
 {
     std::vector<test_sample_1> samples_1 = { test_sample_1(123,
                                                            "fragmented-space test") };

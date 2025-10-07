@@ -1,21 +1,28 @@
 #include "cache_storage.hpp"
-#include "cacheable.hpp"
 #include "mocked_types.hpp"
 #include "storage_parser.hpp"
 
-#include "gmock/gmock.h"
-#include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <filesystem>
-#include <fstream>
 #include <gtest/gtest.h>
-#include <memory>
 #include <random>
-#include <sstream>
-#include <stdexcept>
 #include <thread>
 #include <vector>
+
+namespace
+{
+template <typename StorageType, typename SampleContainer>
+void
+store_and_shutdown(StorageType& storage, const SampleContainer& samples)
+{
+    storage.start();
+    for(const auto& sample : samples)
+    {
+        storage.store(sample);
+    }
+    storage.shutdown();
+}
+}  // namespace
 
 class CachingModuleIntegrationTest : public ::testing::Test
 {
@@ -25,49 +32,20 @@ protected:
         test_file_path =
             "integration_test_cache_" + std::to_string(test_counter++) + ".bin";
         std::remove(test_file_path.c_str());
-        processed_samples.clear();
-        set_sample_processor(this);
+        CachingModuleIntegrationTest::processed_samples.clear();
     }
 
-    void TearDown() override
-    {
-        std::remove(test_file_path.c_str());
-        clear_sample_processor();
-    }
-
-    template <typename StorageType, typename SampleContainer>
-    void store_and_shutdown(StorageType& storage, const SampleContainer& samples)
-    {
-        storage.start();
-        for(const auto& sample : samples)
-        {
-            storage.store(sample);
-        }
-        storage.shutdown();
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }
-
-    static void set_sample_processor(CachingModuleIntegrationTest* instance)
-    {
-        current_test_instance = instance;
-    }
-
-    static void clear_sample_processor() { current_test_instance = nullptr; }
-
-    using storage_type =
-        trace_cache::buffered_storage<trace_cache::flush_worker_factory_t,
-                                      test_type_identifier_t>;
+    void TearDown() override { std::remove(test_file_path.c_str()); }
 
     std::string test_file_path;
-    std::vector<std::variant<test_sample_1, test_sample_2, test_sample_3>>
-        processed_samples;
 
 public:
-    static std::atomic<int>              test_counter;
-    static CachingModuleIntegrationTest* current_test_instance;
+    static std::atomic<int> test_counter;
+    static std::vector<std::variant<test_sample_1, test_sample_2, test_sample_3>>
+        processed_samples;
 
-    void process_sample(test_type_identifier_t          type_id,
-                        const trace_cache::cacheable_t& item)
+    static void execute_sample_processing(test_type_identifier_t          type_id,
+                                          const trace_cache::cacheable_t& item)
     {
         switch(type_id)
         {
@@ -85,25 +63,11 @@ public:
     }
 };
 
-std::atomic<int>              CachingModuleIntegrationTest::test_counter{ 0 };
-CachingModuleIntegrationTest* CachingModuleIntegrationTest::current_test_instance{
-    nullptr
-};
+std::atomic<int> CachingModuleIntegrationTest::test_counter{ 0 };
+std::vector<std::variant<test_sample_1, test_sample_2, test_sample_3>>
+    CachingModuleIntegrationTest::processed_samples{};
 
-struct integration_test_sample_processor_t
-{
-    static void execute_sample_processing(test_type_identifier_t          type_identifier,
-                                          const trace_cache::cacheable_t& value)
-    {
-        if(CachingModuleIntegrationTest::current_test_instance)
-        {
-            CachingModuleIntegrationTest::current_test_instance->process_sample(
-                type_identifier, value);
-        }
-    }
-};
-
-TEST_F(CachingModuleIntegrationTest, BufferFragmentationHandling)
+TEST_F(CachingModuleIntegrationTest, buffer_fragmentation_handling)
 {
     std::vector<test_sample_1> large_samples;
     std::vector<test_sample_3> small_samples;
@@ -118,30 +82,30 @@ TEST_F(CachingModuleIntegrationTest, BufferFragmentationHandling)
     }
 
     {
-        storage_type storage(test_file_path);
+        trace_cache::buffered_storage<trace_cache::flush_worker_factory_t,
+                                      test_type_identifier_t>
+            storage(test_file_path);
         storage.start();
 
         for(size_t i = 0; i < large_samples.size(); ++i)
         {
             storage.store(large_samples[i]);
-            if(i % 3 == 0 && i < small_samples.size())
+            if(i % 2 == 0 && i < small_samples.size())
             {
                 storage.store(small_samples[i]);
             }
         }
 
         storage.shutdown();
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
-    trace_cache::storage_parser<test_type_identifier_t,
-                                integration_test_sample_processor_t, test_sample_1,
-                                test_sample_2, test_sample_3>
+    trace_cache::storage_parser<test_type_identifier_t, CachingModuleIntegrationTest,
+                                test_sample_1, test_sample_2, test_sample_3>
         parser(test_file_path);
-    std::cout << "LOAD 11111" << std::endl;
+
     parser.load();
 
-    EXPECT_GE(processed_samples.size(), 100);
+    EXPECT_EQ(processed_samples.size(), 150);
 
     size_t large_count = 0;
     size_t small_count = 0;
@@ -152,10 +116,10 @@ TEST_F(CachingModuleIntegrationTest, BufferFragmentationHandling)
     }
 
     EXPECT_EQ(large_count, 100);
-    EXPECT_GE(small_count, 30);
+    EXPECT_EQ(small_count, 50);
 }
 
-TEST_F(CachingModuleIntegrationTest, ContentValidationEdgeCases)
+TEST_F(CachingModuleIntegrationTest, content_validation_edge_cases)
 {
     test_sample_1 max_int(std::numeric_limits<int>::max(), "max_value");
     test_sample_1 min_int(std::numeric_limits<int>::min(), "min_value");
@@ -180,19 +144,19 @@ TEST_F(CachingModuleIntegrationTest, ContentValidationEdgeCases)
                          large_payload, empty_payload, zero_payload };
 
     {
-        storage_type storage(test_file_path);
+        trace_cache::buffered_storage<trace_cache::flush_worker_factory_t,
+                                      test_type_identifier_t>
+            storage(test_file_path);
         storage.start();
         for(const auto& sample : test_samples)
         {
             std::visit([&storage](const auto& s) { storage.store(s); }, sample);
         }
         storage.shutdown();
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
-    trace_cache::storage_parser<test_type_identifier_t,
-                                integration_test_sample_processor_t, test_sample_1,
-                                test_sample_2, test_sample_3>
+    trace_cache::storage_parser<test_type_identifier_t, CachingModuleIntegrationTest,
+                                test_sample_1, test_sample_2, test_sample_3>
         parser(test_file_path);
     parser.load();
 
@@ -208,10 +172,10 @@ TEST_F(CachingModuleIntegrationTest, ContentValidationEdgeCases)
     EXPECT_EQ(std::get<test_sample_3>(processed_samples[10]), zero_payload);
 }
 
-TEST_F(CachingModuleIntegrationTest, StressTestMultipleFragmentations)
+TEST_F(CachingModuleIntegrationTest, stress_test_multiple_fragmentations)
 {
-    const int iterations            = 5;
-    const int samples_per_iteration = 200;
+    const int iterations            = 50;
+    const int samples_per_iteration = 100000;
 
     std::mt19937                          rng(42);
     std::uniform_int_distribution<int>    value_dist(1, 1000);
@@ -221,7 +185,9 @@ TEST_F(CachingModuleIntegrationTest, StressTestMultipleFragmentations)
     all_samples.reserve(iterations * samples_per_iteration);
 
     {
-        storage_type storage(test_file_path);
+        trace_cache::buffered_storage<trace_cache::flush_worker_factory_t,
+                                      test_type_identifier_t>
+            storage(test_file_path);
         storage.start();
 
         for(int iter = 0; iter < iterations; ++iter)
@@ -235,21 +201,14 @@ TEST_F(CachingModuleIntegrationTest, StressTestMultipleFragmentations)
                 test_sample_1 sample(value, text);
                 all_samples.push_back(sample);
                 storage.store(sample);
-
-                if(i % 50 == 0)
-                {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                }
             }
         }
 
         storage.shutdown();
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
 
-    trace_cache::storage_parser<test_type_identifier_t,
-                                integration_test_sample_processor_t, test_sample_1,
-                                test_sample_2, test_sample_3>
+    trace_cache::storage_parser<test_type_identifier_t, CachingModuleIntegrationTest,
+                                test_sample_1, test_sample_2, test_sample_3>
         parser(test_file_path);
     parser.load();
 
@@ -261,23 +220,25 @@ TEST_F(CachingModuleIntegrationTest, StressTestMultipleFragmentations)
     }
 }
 
-TEST_F(CachingModuleIntegrationTest, PerformanceWriteTest)
+TEST_F(CachingModuleIntegrationTest, performance_write_test)
 {
-    const int    sample_count = 1000;
-    const size_t payload_size = 100;
+    const int    sample_count = 500000;
+    const size_t payload_size = 1024 * 5;
 
     std::vector<test_sample_1> samples;
     samples.reserve(sample_count);
     for(int i = 0; i < sample_count; ++i)
     {
-        std::string payload(payload_size, 'P');
+        std::string payload(payload_size, (i % 255));
         samples.emplace_back(i, payload);
     }
 
     auto start_time = std::chrono::high_resolution_clock::now();
 
     {
-        storage_type storage(test_file_path);
+        trace_cache::buffered_storage<trace_cache::flush_worker_factory_t,
+                                      test_type_identifier_t>
+            storage(test_file_path);
         storage.start();
 
         for(const auto& sample : samples)
@@ -286,29 +247,32 @@ TEST_F(CachingModuleIntegrationTest, PerformanceWriteTest)
         }
 
         storage.shutdown();
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
+    using unit = std::chrono::microseconds;
+
     auto end_time = std::chrono::high_resolution_clock::now();
-    auto duration =
-        std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+    auto duration_in_microseconds =
+        std::chrono::duration_cast<unit>(end_time - start_time);
+    auto period = static_cast<double>(unit::period().den);
 
-    double avg_write_time = static_cast<double>(duration.count()) / sample_count;
-    double throughput = (sample_count * payload_size) / (duration.count() / 1000000.0);
+    double avg_write_time =
+        static_cast<double>(duration_in_microseconds.count()) / sample_count;
+    double throughput =
+        (sample_count * payload_size) / (duration_in_microseconds.count() / period);
 
-    EXPECT_LT(avg_write_time, 1000.0);
-    EXPECT_GT(throughput, 1000.0);
+    EXPECT_LT(avg_write_time, 50.0);     // maximum 10 microseconds per 5KB sample
+    EXPECT_GT(throughput, 10 * 1024.0);  // at least 10KB per sec
 
-    trace_cache::storage_parser<test_type_identifier_t,
-                                integration_test_sample_processor_t, test_sample_1,
-                                test_sample_2, test_sample_3>
+    trace_cache::storage_parser<test_type_identifier_t, CachingModuleIntegrationTest,
+                                test_sample_1, test_sample_2, test_sample_3>
         parser(test_file_path);
     parser.load();
 
     ASSERT_EQ(processed_samples.size(), sample_count);
 }
 
-TEST_F(CachingModuleIntegrationTest, ConcurrentWriteReadValidation)
+TEST_F(CachingModuleIntegrationTest, concurrent_write_read_validation)
 {
     const int                thread_count       = 4;
     const int                samples_per_thread = 250;
@@ -316,12 +280,14 @@ TEST_F(CachingModuleIntegrationTest, ConcurrentWriteReadValidation)
     std::atomic<int>         write_counter{ 0 };
 
     {
-        storage_type storage(test_file_path);
+        trace_cache::buffered_storage<trace_cache::flush_worker_factory_t,
+                                      test_type_identifier_t>
+            storage(test_file_path);
         storage.start();
 
         for(int t = 0; t < thread_count; ++t)
         {
-            writers.emplace_back([&storage, &write_counter, t, samples_per_thread]() {
+            writers.emplace_back([&storage, &write_counter, t]() {
                 for(int i = 0; i < samples_per_thread; ++i)
                 {
                     int           unique_id = t * samples_per_thread + i;
@@ -349,9 +315,8 @@ TEST_F(CachingModuleIntegrationTest, ConcurrentWriteReadValidation)
 
     EXPECT_EQ(write_counter.load(), thread_count * samples_per_thread);
 
-    trace_cache::storage_parser<test_type_identifier_t,
-                                integration_test_sample_processor_t, test_sample_1,
-                                test_sample_2, test_sample_3>
+    trace_cache::storage_parser<test_type_identifier_t, CachingModuleIntegrationTest,
+                                test_sample_1, test_sample_2, test_sample_3>
         parser(test_file_path);
     parser.load();
 

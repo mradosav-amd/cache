@@ -1,20 +1,36 @@
 #include "cache_storage.hpp"
-#include "cacheable.hpp"
 #include "mocked_types.hpp"
 
 #include "gmock/gmock.h"
-#include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <filesystem>
-#include <fstream>
 #include <gtest/gtest.h>
 #include <memory>
-#include <random>
 #include <sstream>
 #include <stdexcept>
 #include <thread>
 #include <vector>
+
+namespace
+{
+
+template <typename T>
+void
+verify_buffer_contains(const T& sample, const uint8_t* buffer, size_t& buffer_pos)
+{
+    auto type_id = *reinterpret_cast<const test_type_identifier_t*>(buffer + buffer_pos);
+    EXPECT_EQ(type_id, T::type_identifier);
+    buffer_pos += sizeof(test_type_identifier_t);
+
+    auto size = *reinterpret_cast<const size_t*>(buffer + buffer_pos);
+    EXPECT_EQ(size, trace_cache::get_size(sample));
+    buffer_pos += sizeof(size_t);
+
+    uint8_t* deserialize_ptr = const_cast<uint8_t*>(buffer + buffer_pos);
+    auto     deserialized    = trace_cache::deserialize<T>(deserialize_ptr);
+    EXPECT_EQ(deserialized, sample);
+    buffer_pos += size;
+}
 
 struct mock_worker_t
 {
@@ -82,6 +98,7 @@ struct mock_invalid_worker_factory_t
         return nullptr;
     }
 };
+}  // namespace
 
 class BufferedStorageTest : public ::testing::Test
 {
@@ -101,7 +118,7 @@ protected:
     std::string             test_file_path;
     static std::atomic<int> test_counter;
 
-    void SetUpOnCall()
+    void SetUpStartStopOnCall()
     {
         ON_CALL(*g_mock_worker, start).WillByDefault([] {
             g_mock_worker->m_sync->is_running = true;
@@ -111,30 +128,11 @@ protected:
             g_mock_worker->m_sync->is_running = false;
         });
     }
-
-    template <typename T>
-    void verify_buffer_contains(const T& sample, const uint8_t* buffer,
-                                size_t& buffer_pos)
-    {
-        auto type_id =
-            *reinterpret_cast<const test_type_identifier_t*>(buffer + buffer_pos);
-        EXPECT_EQ(type_id, T::type_identifier);
-        buffer_pos += sizeof(test_type_identifier_t);
-
-        auto size = *reinterpret_cast<const size_t*>(buffer + buffer_pos);
-        EXPECT_EQ(size, trace_cache::get_size(sample));
-        buffer_pos += sizeof(size_t);
-
-        uint8_t* deserialize_ptr = const_cast<uint8_t*>(buffer + buffer_pos);
-        auto     deserialized    = trace_cache::deserialize<T>(deserialize_ptr);
-        EXPECT_EQ(deserialized, sample);
-        buffer_pos += size;
-    }
 };
 
 std::atomic<int> BufferedStorageTest::test_counter{ 0 };
 
-TEST_F(BufferedStorageTest, TestStart)
+TEST_F(BufferedStorageTest, multiple_start)
 {
     trace_cache::buffered_storage<mock_worker_factory_t, test_type_identifier_t> storage(
         test_file_path);
@@ -148,7 +146,7 @@ TEST_F(BufferedStorageTest, TestStart)
     EXPECT_EQ(test_file_path, g_mock_worker->m_filepath);
 }
 
-TEST_F(BufferedStorageTest, TestStartStop)
+TEST_F(BufferedStorageTest, start_stop)
 {
     trace_cache::buffered_storage<mock_worker_factory_t, test_type_identifier_t> storage(
         test_file_path);
@@ -164,7 +162,7 @@ TEST_F(BufferedStorageTest, TestStartStop)
     storage.shutdown();
 }
 
-TEST_F(BufferedStorageTest, TryStoreEventSampleThrow)
+TEST_F(BufferedStorageTest, try_store_event_sample_throw)
 {
     trace_cache::buffered_storage<mock_worker_factory_t, test_type_identifier_t> storage(
         test_file_path);
@@ -179,11 +177,11 @@ TEST_F(BufferedStorageTest, TryStoreEventSampleThrow)
     EXPECT_NO_THROW(storage.shutdown());
 }
 
-TEST_F(BufferedStorageTest, StoreAfterShutdown)
+TEST_F(BufferedStorageTest, store_after_shutdown)
 {
     trace_cache::buffered_storage<mock_worker_factory_t, test_type_identifier_t> storage(
         test_file_path);
-    SetUpOnCall();
+    SetUpStartStopOnCall();
 
     EXPECT_CALL(*g_mock_worker, start).Times(1);
     EXPECT_CALL(*g_mock_worker, stop).Times(1);
@@ -198,7 +196,7 @@ TEST_F(BufferedStorageTest, StoreAfterShutdown)
     EXPECT_THROW(storage.store(after_shutdown), std::runtime_error);
 }
 
-TEST_F(BufferedStorageTest, InvalidWorker)
+TEST_F(BufferedStorageTest, invalid_worker)
 {
     trace_cache::buffered_storage<mock_invalid_worker_factory_t, test_type_identifier_t>
         storage(test_file_path);
@@ -207,11 +205,11 @@ TEST_F(BufferedStorageTest, InvalidWorker)
     EXPECT_NO_THROW(storage.shutdown());
 }
 
-TEST_F(BufferedStorageTest, StoreEventSamples)
+TEST_F(BufferedStorageTest, store_event_samples)
 {
     trace_cache::buffered_storage<mock_worker_factory_t, test_type_identifier_t> storage(
         test_file_path);
-    SetUpOnCall();
+    SetUpStartStopOnCall();
 
     EXPECT_CALL(*g_mock_worker, start).Times(1);
     EXPECT_CALL(*g_mock_worker, stop).Times(1);
@@ -224,11 +222,11 @@ TEST_F(BufferedStorageTest, StoreEventSamples)
     EXPECT_NO_THROW(storage.shutdown());
 }
 
-TEST_F(BufferedStorageTest, ImmediatelyFlush)
+TEST_F(BufferedStorageTest, immediately_flush)
 {
     trace_cache::buffered_storage<mock_worker_factory_t, test_type_identifier_t> storage(
         test_file_path);
-    SetUpOnCall();
+    SetUpStartStopOnCall();
     EXPECT_CALL(*g_mock_worker, start).Times(1);
     EXPECT_CALL(*g_mock_worker, stop).Times(1);
 
@@ -237,11 +235,11 @@ TEST_F(BufferedStorageTest, ImmediatelyFlush)
     EXPECT_NO_THROW(storage.shutdown());
 }
 
-TEST_F(BufferedStorageTest, FlushBelowThreshold)
+TEST_F(BufferedStorageTest, flush_below_threshold)
 {
     trace_cache::buffered_storage<mock_worker_factory_t, test_type_identifier_t> storage(
         test_file_path);
-    SetUpOnCall();
+    SetUpStartStopOnCall();
     EXPECT_CALL(*g_mock_worker, start).Times(1);
     EXPECT_CALL(*g_mock_worker, stop).Times(1);
 
@@ -259,7 +257,7 @@ TEST_F(BufferedStorageTest, MixedSampleTypes)
 {
     trace_cache::buffered_storage<mock_worker_factory_t, test_type_identifier_t> storage(
         test_file_path);
-    SetUpOnCall();
+    SetUpStartStopOnCall();
     EXPECT_CALL(*g_mock_worker, start).Times(1);
     EXPECT_CALL(*g_mock_worker, stop).Times(1);
 
@@ -299,11 +297,11 @@ TEST_F(BufferedStorageTest, MixedSampleTypes)
     EXPECT_EQ(buffer_pos, buffer_data.size());
 }
 
-TEST_F(BufferedStorageTest, LargePayloadHandling)
+TEST_F(BufferedStorageTest, large_payload_handling)
 {
     trace_cache::buffered_storage<mock_worker_factory_t, test_type_identifier_t> storage(
         test_file_path);
-    SetUpOnCall();
+    SetUpStartStopOnCall();
     EXPECT_CALL(*g_mock_worker, start).Times(1);
     EXPECT_CALL(*g_mock_worker, stop).Times(1);
 
@@ -330,11 +328,11 @@ TEST_F(BufferedStorageTest, LargePayloadHandling)
     EXPECT_NO_THROW(storage.shutdown());
 }
 
-TEST_F(BufferedStorageTest, ConcurrentMixedTypeStores)
+TEST_F(BufferedStorageTest, concurrent_mixed_type_store)
 {
     trace_cache::buffered_storage<mock_worker_factory_t, test_type_identifier_t> storage(
         test_file_path);
-    SetUpOnCall();
+    SetUpStartStopOnCall();
     EXPECT_CALL(*g_mock_worker, start).Times(1);
     EXPECT_CALL(*g_mock_worker, stop).Times(1);
 
@@ -399,11 +397,11 @@ TEST_F(BufferedStorageTest, ConcurrentMixedTypeStores)
     EXPECT_EQ(actual_samples, num_threads * items_per_thread);
 }
 
-TEST_F(BufferedStorageTest, RepeatedFragmentation)
+TEST_F(BufferedStorageTest, repeated_fragmentation)
 {
     trace_cache::buffered_storage<mock_worker_factory_t, test_type_identifier_t> storage(
         test_file_path);
-    SetUpOnCall();
+    SetUpStartStopOnCall();
     EXPECT_CALL(*g_mock_worker, start).Times(1);
     EXPECT_CALL(*g_mock_worker, stop).Times(1);
 

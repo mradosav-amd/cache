@@ -1,9 +1,11 @@
 #include "src/cache_storage.hpp"
 #include "src/cacheable.hpp"
 #include "src/storage_parser.hpp"
+#include <memory>
 #include <string>
 
-// ---------------- Samples definitions ----------------
+// ---------------- Samples Definitions ----------------
+
 enum class type_identifier_t : uint32_t
 {
     track_sample     = 0,
@@ -156,7 +158,8 @@ trace_cache::get_size(const process_sample& item)
            utility::get_size_helper(item.extdata.c_str());
 }
 
-// ---------------- post processing ----------------
+// ---------------- Post Processing ----------------
+
 struct handler_t
 {
     virtual ~handler_t()                               = default;
@@ -167,35 +170,40 @@ struct rocpd_format_handler_t : handler_t
 {
     void handle_track(const track_sample& track) override
     {
-        std::cout << track.track_name << std::endl;
+        std::cout << "rocpd_format: " << track.track_name << std::endl;
     };
 
     void handle_process(const process_sample& process) override
     {
-        std::cout << process.command << std::endl;
+        std::cout << "rocpd_format: " << process.command << std::endl;
     };
 };
 struct perfetto_format_handler_t : handler_t
 {
-    void handle_track(const track_sample&) override {
-
+    void handle_track(const track_sample& track) override
+    {
+        std::cout << "perfetto_format: " << track.track_name << std::endl;
     };
 
-    void handle_process(const process_sample&) override {
-
+    void handle_process(const process_sample& process) override
+    {
+        std::cout << "perfetto_format: " << process.command << std::endl;
     };
 };
 
 struct type_processing_t
 {
+    static void clear_formats() { s_enabled_formats.clear(); }
+
+    static void add_format(std::unique_ptr<handler_t> format)
+    {
+        s_enabled_formats.push_back(std::move(format));
+    }
+
     static void execute_sample_processing(type_identifier_t               type_identifier,
                                           const trace_cache::cacheable_t& value)
     {
-        std::vector<std::unique_ptr<handler_t>> enabled_formats;
-        enabled_formats.push_back(std::make_unique<rocpd_format_handler_t>());
-
-        std::cout << "calling execute" << std::endl;
-        for(const auto& handler : enabled_formats)
+        for(const auto& handler : s_enabled_formats)
         {
             switch(type_identifier)
             {
@@ -215,7 +223,12 @@ struct type_processing_t
             }
         }
     }
+
+private:
+    static std::vector<std::unique_ptr<handler_t>> s_enabled_formats;
 };
+
+std::vector<std::unique_ptr<handler_t>> type_processing_t::s_enabled_formats{};
 
 // ---------------- Example ----------------
 
@@ -266,6 +279,9 @@ run_multithread_example()
     }
 
     buffered_storage.shutdown();
+
+    // Prepare formats
+    type_processing_t::add_format(std::make_unique<rocpd_format_handler_t>());
 
     trace_cache::storage_parser<type_identifier_t, type_processing_t, track_sample,
                                 process_sample>

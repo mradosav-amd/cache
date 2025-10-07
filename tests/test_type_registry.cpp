@@ -1,7 +1,6 @@
-#include "cacheable.hpp"
+#include "mocked_types.hpp"
 #include "type_registry.hpp"
 
-#include "mocked_types.hpp"
 #include <gtest/gtest.h>
 
 class TypeRegistryTest : public ::testing::Test
