@@ -102,7 +102,7 @@ store_value(const Type& value, uint8_t* buffer, size_t& position)
 
 template <typename T>
 static void
-parse_value(uint8_t*& data_pos, T& arg)
+parse_value(T& arg, uint8_t*& data_pos)
 {
     if constexpr(std::is_same_v<T, std::string>)
     {

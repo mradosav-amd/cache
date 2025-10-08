@@ -80,8 +80,8 @@ inline test_sample_1
 trace_cache::deserialize(uint8_t*& buffer)
 {
     test_sample_1 result;
-    trace_cache::utility::parse_value(buffer, result.value);
-    trace_cache::utility::parse_value(buffer, result.text);
+    trace_cache::utility::parse_value(result.value, buffer);
+    trace_cache::utility::parse_value(result.text, buffer);
     return result;
 }
 
@@ -107,8 +107,8 @@ inline test_sample_2
 trace_cache::deserialize(uint8_t*& buffer)
 {
     test_sample_2 result;
-    trace_cache::utility::parse_value(buffer, result.data);
-    trace_cache::utility::parse_value(buffer, result.sample_id);
+    trace_cache::utility::parse_value(result.data, buffer);
+    trace_cache::utility::parse_value(result.sample_id, buffer);
     return result;
 }
 
@@ -133,7 +133,7 @@ inline test_sample_3
 trace_cache::deserialize(uint8_t*& buffer)
 {
     test_sample_3 result;
-    trace_cache::utility::parse_value(buffer, result.payload);
+    trace_cache::utility::parse_value(result.payload, buffer);
     return result;
 }
 

@@ -51,11 +51,11 @@ track_sample
 trace_cache::deserialize(uint8_t*& buffer)
 {
     track_sample result;
-    utility::parse_value(buffer, result.track_name);
-    utility::parse_value(buffer, result.node_id);
-    utility::parse_value(buffer, result.process_id);
-    utility::parse_value(buffer, result.thread_id);
-    utility::parse_value(buffer, result.extdata);
+    utility::parse_value(result.track_name, buffer);
+    utility::parse_value(result.node_id, buffer);
+    utility::parse_value(result.process_id, buffer);
+    utility::parse_value(result.thread_id, buffer);
+    utility::parse_value(result.extdata, buffer);
     return result;
 }
 
@@ -129,17 +129,17 @@ process_sample
 trace_cache::deserialize(uint8_t*& buffer)
 {
     process_sample result;
-    utility::parse_value(buffer, result.guid);
-    utility::parse_value(buffer, result.node_id);
-    utility::parse_value(buffer, result.parent_process_id);
-    utility::parse_value(buffer, result.process_id);
-    utility::parse_value(buffer, result.init);
-    utility::parse_value(buffer, result.fini);
-    utility::parse_value(buffer, result.start);
-    utility::parse_value(buffer, result.end);
-    utility::parse_value(buffer, result.command);
-    utility::parse_value(buffer, result.env);
-    utility::parse_value(buffer, result.extdata);
+    utility::parse_value(result.guid, buffer);
+    utility::parse_value(result.node_id, buffer);
+    utility::parse_value(result.parent_process_id, buffer);
+    utility::parse_value(result.process_id, buffer);
+    utility::parse_value(result.init, buffer);
+    utility::parse_value(result.fini, buffer);
+    utility::parse_value(result.start, buffer);
+    utility::parse_value(result.end, buffer);
+    utility::parse_value(result.command, buffer);
+    utility::parse_value(result.env, buffer);
+    utility::parse_value(result.extdata, buffer);
     return result;
 }
 
