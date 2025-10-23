@@ -1,7 +1,8 @@
 name: rocprofiler-systems Debian (GCC, Python, ROCm)
 run-name: debian
 on:
-  public
+  issues:
+    types: [opened, edited, milestoned]
 
 jobs:
   debian:
