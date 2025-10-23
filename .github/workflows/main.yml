@@ -1,9 +1,7 @@
 name: rocprofiler-systems Debian (GCC, Python, ROCm)
 run-name: debian
 on:
-  pull_request:
-    paths:
-      - "*"
+  public
 
 jobs:
   debian:
