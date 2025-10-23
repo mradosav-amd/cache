@@ -14,6 +14,8 @@ jobs:
       run: |
         echo "Disk usage before cleanup:"
         df -h
+
+        du -a /dev/root | sort -n -r | head -n 10
   
         # Clean package cache
         apt-get clean
