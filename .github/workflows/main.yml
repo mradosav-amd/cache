@@ -15,9 +15,7 @@ jobs:
         echo "Disk usage before cleanup:"
         df -h
 
-        du -a /__e | sort -n -r | head -n 10
-        rm -rf /__e/node24*
-        rm -rf /__e/node20*
+        du -a / | sort -n -r | head -n 50
   
         echo "Disk usage after cleanup:"
         df -h
