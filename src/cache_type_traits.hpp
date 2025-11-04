@@ -115,7 +115,7 @@ struct has_get_size<T, void_t<decltype(get_size(std::declval<const T&>()))>>
 {};
 
 template <typename T, typename TypeIdentifierEnum>
-void
+__attribute__((always_inline)) inline constexpr void
 check_type()
 {
     static_assert(has_serialize<T>::value, "Type don't have `serialize` function.");

@@ -64,6 +64,10 @@ public:
 
         sample_header header;
 
+        std::vector<uint8_t> sample;
+        sample.reserve(4096);
+        size_t last_capacity = sample.capacity();
+
         while(!ifs.eof())
         {
             ifs.read(reinterpret_cast<char*>(&header), sizeof(header));
@@ -73,8 +77,13 @@ public:
                 continue;
             }
 
-            std::vector<uint8_t> sample;
-            sample.reserve(header.sample_size);
+            if(__builtin_expect(header.sample_size > last_capacity, 0))
+            {
+                sample.reserve(header.sample_size);
+                last_capacity = sample.capacity();
+            }
+
+            sample.resize(header.sample_size);
             ifs.read(reinterpret_cast<char*>(sample.data()), header.sample_size);
 
             if(ifs.fail())

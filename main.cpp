@@ -182,12 +182,14 @@ struct rocpd_format_handler_t : handler_t<rocpd_format_handler_t>
 {
     void handle_track_impl(const track_sample& track)
     {
-        std::cout << "rocpd_format: " << track.track_name << std::endl;
+        // std::cout << "rocpd_format: " << track.track_name << std::endl;
+        (void) track.track_name;
     }
 
     void handle_process_impl(const process_sample& process)
     {
-        std::cout << "rocpd_format: " << process.command << std::endl;
+        // std::cout << "rocpd_format: " << process.command << std::endl;
+        (void) process.command;
     }
 };
 
@@ -195,12 +197,14 @@ struct perfetto_format_handler_t : handler_t<perfetto_format_handler_t>
 {
     void handle_track_impl(const track_sample& track)
     {
-        std::cout << "perfetto_format: " << track.track_name << std::endl;
+        // std::cout << "perfetto_format: " << track.track_name << std::endl;
+        (void) track.track_name;
     }
 
     void handle_process_impl(const process_sample& process)
     {
-        std::cout << "perfetto_format: " << process.command << std::endl;
+        // std::cout << "perfetto_format: " << process.command << std::endl;
+        (void) process.command;
     }
 };
 
@@ -273,19 +277,24 @@ std::vector<handler_view> type_processing_t::s_enabled_formats{};
 
 // ---------------- Example ----------------
 
+constexpr auto number_of_iterations = 10000000;
+
 void
 run_multithread_example()
 {
-    auto filepath = trace_cache::utility::get_buffered_storage_filename(0, 0);
-    trace_cache::buffered_storage<trace_cache::flush_worker_factory_t, type_identifier_t>
-        buffered_storage(filepath);
-    buffered_storage.start();
-
-    const auto number_of_iterations = 1000;
-
     std::vector<std::thread> threads;
+    threads.reserve(2);
 
-    threads.push_back(std::thread([&]() {
+    rocpd_format_handler_t rocpd_handler;
+    type_processing_t::add_format(rocpd_handler);
+
+    threads.push_back(std::thread([]() {
+        auto filepath = trace_cache::utility::get_buffered_storage_filename(0, 0);
+        trace_cache::buffered_storage<trace_cache::flush_worker_factory_t,
+                                      type_identifier_t>
+            buffered_storage(filepath);
+        buffered_storage.start();
+
         size_t node_id    = 1;
         size_t process_id = 2;
         size_t thread_id  = 3;
@@ -302,9 +311,23 @@ run_multithread_example()
             thread_id++;
             count++;
         } while(count != number_of_iterations);
+
+        buffered_storage.shutdown();
+
+        trace_cache::storage_parser<type_identifier_t, type_processing_t, track_sample,
+                                    process_sample>
+            parser(filepath);
+
+        parser.load();
     }));
 
-    threads.push_back(std::thread([&]() {
+    threads.push_back(std::thread([]() {
+        auto filepath = trace_cache::utility::get_buffered_storage_filename(1, 1);
+        trace_cache::buffered_storage<trace_cache::flush_worker_factory_t,
+                                      type_identifier_t>
+            buffered_storage(filepath);
+        buffered_storage.start();
+
         size_t count = 0;
         do
         {
@@ -312,24 +335,18 @@ run_multithread_example()
             buffered_storage.store(ps);
             count++;
         } while(count != number_of_iterations);
+
+        trace_cache::storage_parser<type_identifier_t, type_processing_t, track_sample,
+                                    process_sample>
+            parser(filepath);
+
+        parser.load();
     }));
 
     for(auto& thread : threads)
     {
         thread.join();
     }
-
-    buffered_storage.shutdown();
-
-    // Prepare formats
-    rocpd_format_handler_t rocpd_handler;
-    type_processing_t::add_format(rocpd_handler);
-
-    trace_cache::storage_parser<type_identifier_t, type_processing_t, track_sample,
-                                process_sample>
-        parser(filepath);
-
-    parser.load();
 }
 
 int
