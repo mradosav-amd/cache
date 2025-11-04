@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cacheable.hpp"
+#include <cmath>
 #include <cstddef>
 #include <vector>
 
@@ -17,13 +18,13 @@ struct test_sample_1 : public trace_cache::cacheable_t
         test_type_identifier_t::sample_type_1;
 
     test_sample_1() = default;
-    test_sample_1(int v, std::string s)
+    test_sample_1(int v, std::string_view s)
     : value(v)
-    , text(std::move(s))
+    , text(s)
     {}
 
-    int         value = 0;
-    std::string text;
+    int              value = 0;
+    std::string_view text;
 
     bool operator==(const test_sample_1& other) const
     {
@@ -47,7 +48,14 @@ struct test_sample_2 : public trace_cache::cacheable_t
 
     bool operator==(const test_sample_2& other) const
     {
-        return std::abs(data - other.data) < 1e-9 && sample_id == other.sample_id;
+        if(sample_id != other.sample_id) return false;
+
+        if(std::isnan(data) && std::isnan(other.data)) return true;
+
+        if(std::isinf(data) && std::isinf(other.data))
+            return std::signbit(data) == std::signbit(other.data);
+
+        return std::abs(data - other.data) < 1e-9;
     }
 };
 
@@ -72,7 +80,7 @@ trace_cache::serialize(uint8_t* buffer, const test_sample_1& item)
 {
     size_t position = 0;
     trace_cache::utility::store_value(item.value, buffer, position);
-    trace_cache::utility::store_value(item.text.c_str(), buffer, position);
+    trace_cache::utility::store_value(item.text, buffer, position);
 }
 
 template <>
@@ -90,7 +98,7 @@ inline size_t
 trace_cache::get_size(const test_sample_1& item)
 {
     return trace_cache::utility::get_size_helper(item.value) +
-           trace_cache::utility::get_size_helper(item.text.c_str());
+           trace_cache::utility::get_size_helper(item.text);
 }
 
 template <>

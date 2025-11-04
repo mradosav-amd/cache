@@ -38,32 +38,31 @@ const auto get_buffered_storage_filename = [](const int& ppid, const int& pid) {
 };
 // helper functions
 
-template <typename T>
-constexpr size_t
-get_size_helper(T&& val)
+template <typename Type>
+inline void
+check_is_type_supported()
 {
-    constexpr bool is_supported_type = type_traits::supported_types::is_supported<T>;
+    constexpr bool is_supported_type = type_traits::supported_types::is_supported<Type>;
     static_assert(is_supported_type,
-                  "Supported types are const char*, char*, "
+                  "Supported types are std::string_view"
                   "unsigned long, unsigned int, long, unsigned "
                   "char, std::vector<unsigned char>, double, and int.");
+}
 
-    if constexpr(type_traits::is_string_literal_v<T>)
-    {
-        size_t count = 0;
-        while(val[count] != '\0')
-        {
-            ++count;
-        }
-        return ++count;
-    }
-    else if constexpr(std::is_same_v<std::decay_t<T>, std::vector<uint8_t>>)
+template <typename Type>
+constexpr size_t
+get_size_helper(Type&& val)
+{
+    check_is_type_supported<Type>();
+
+    if constexpr(type_traits::is_string_view_v<Type> ||
+                 std::is_same_v<std::decay_t<Type>, std::vector<uint8_t>>)
     {
         return val.size() + sizeof(size_t);
     }
     else
     {
-        return sizeof(T);
+        return sizeof(Type);
     }
 }
 
@@ -71,20 +70,12 @@ template <typename Type>
 void
 store_value(const Type& value, uint8_t* buffer, size_t& position)
 {
-    constexpr bool is_supported_type = type_traits::supported_types::is_supported<Type>;
-    static_assert(is_supported_type,
-                  "Supported types are const char*, char*, "
-                  "unsigned long, unsigned int, long, unsigned "
-                  "char, std::vector<unsigned char>, double, and int.");
+    check_is_type_supported<Type>();
 
     size_t len  = 0;
     auto*  dest = buffer + position;
-    if constexpr(type_traits::is_string_literal_v<Type>)
-    {
-        len = get_size_helper(value);
-        std::memcpy(dest, value, len);  // will include \0
-    }
-    else if constexpr(std::is_same_v<std::decay_t<Type>, std::vector<uint8_t>>)
+    if constexpr(type_traits::is_string_view_v<Type> ||
+                 std::is_same_v<std::decay_t<Type>, std::vector<uint8_t>>)
     {
         size_t elem_count = value.size();
         len               = elem_count + sizeof(size_t);
@@ -100,16 +91,21 @@ store_value(const Type& value, uint8_t* buffer, size_t& position)
     position += len;
 };
 
-template <typename T>
+template <typename Type>
 static void
-parse_value(T& arg, uint8_t*& data_pos)
+parse_value(Type& arg, uint8_t*& data_pos)
 {
-    if constexpr(std::is_same_v<T, std::string>)
+    check_is_type_supported<Type>();
+
+    if constexpr(type_traits::is_string_view_v<Type>)
     {
-        arg = std::string((const char*) data_pos);
-        data_pos += get_size_helper((const char*) data_pos);
+        size_t string_size = *reinterpret_cast<const size_t*>(data_pos);
+        data_pos += sizeof(size_t);
+
+        arg = std::string_view{ (const char*) data_pos, string_size };
+        data_pos += string_size;
     }
-    else if constexpr(std::is_same_v<T, std::vector<uint8_t>>)
+    else if constexpr(std::is_same_v<Type, std::vector<uint8_t>>)
     {
         size_t vector_size = *reinterpret_cast<const size_t*>(data_pos);
         data_pos += sizeof(size_t);
@@ -119,8 +115,8 @@ parse_value(T& arg, uint8_t*& data_pos)
     }
     else
     {
-        arg = *reinterpret_cast<const T*>(data_pos);
-        data_pos += sizeof(T);
+        arg = *reinterpret_cast<const Type*>(data_pos);
+        data_pos += sizeof(Type);
     }
 }
 

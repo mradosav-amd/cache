@@ -15,8 +15,9 @@ enum class type_identifier_t : uint32_t
 
 struct track_sample : public trace_cache::cacheable_t
 {
-    explicit track_sample(std::string _track_name, size_t _node_id, size_t _process_id,
-                          size_t _thread_id, std::string _extdata)
+    explicit track_sample(std::string_view _track_name, size_t _node_id,
+                          size_t _process_id, size_t _thread_id,
+                          std::string_view _extdata)
     : track_name(std::move(_track_name))
     , node_id(_node_id)
     , process_id(_process_id)
@@ -27,11 +28,11 @@ struct track_sample : public trace_cache::cacheable_t
 
     static constexpr type_identifier_t type_identifier = type_identifier_t::track_sample;
 
-    std::string track_name;
-    size_t      node_id;
-    size_t      process_id;
-    size_t      thread_id;
-    std::string extdata;
+    std::string_view track_name;
+    size_t           node_id;
+    size_t           process_id;
+    size_t           thread_id;
+    std::string_view extdata;
 };
 
 template <>
@@ -39,11 +40,11 @@ void
 trace_cache::serialize(uint8_t* buffer, const track_sample& item)
 {
     size_t position = 0;
-    utility::store_value(item.track_name.c_str(), buffer, position);
+    utility::store_value(item.track_name, buffer, position);
     utility::store_value(item.node_id, buffer, position);
     utility::store_value(item.process_id, buffer, position);
     utility::store_value(item.thread_id, buffer, position);
-    utility::store_value(item.extdata.c_str(), buffer, position);
+    utility::store_value(item.extdata, buffer, position);
 }
 
 template <>
@@ -63,19 +64,20 @@ template <>
 size_t
 trace_cache::get_size(const track_sample& item)
 {
-    return utility::get_size_helper(item.track_name.c_str()) +
+    return utility::get_size_helper(item.track_name) +
            utility::get_size_helper(item.node_id) +
            utility::get_size_helper(item.process_id) +
            utility::get_size_helper(item.thread_id) +
-           utility::get_size_helper(item.extdata.c_str());
+           utility::get_size_helper(item.extdata);
 }
 
 struct process_sample : public trace_cache::cacheable_t
 {
-    explicit process_sample(std::string _guid, size_t _node_id, size_t _parent_process_id,
-                            size_t _process_id, size_t _init, size_t _fini, size_t _start,
-                            size_t _end, std::string _command, std::string _env,
-                            std::string _extdata)
+    explicit process_sample(std::string_view _guid, size_t _node_id,
+                            size_t _parent_process_id, size_t _process_id, size_t _init,
+                            size_t _fini, size_t _start, size_t _end,
+                            std::string_view _command, std::string_view _env,
+                            std::string_view _extdata)
     : guid(std::move(_guid))
     , node_id(_node_id)
     , parent_process_id(_parent_process_id)
@@ -93,17 +95,17 @@ struct process_sample : public trace_cache::cacheable_t
     static constexpr type_identifier_t type_identifier =
         type_identifier_t::process_sample;
 
-    std::string guid;
-    size_t      node_id;
-    size_t      parent_process_id;
-    size_t      process_id;
-    size_t      init;
-    size_t      fini;
-    size_t      start;
-    size_t      end;
-    std::string command;
-    std::string env;
-    std::string extdata;
+    std::string_view guid;
+    size_t           node_id;
+    size_t           parent_process_id;
+    size_t           process_id;
+    size_t           init;
+    size_t           fini;
+    size_t           start;
+    size_t           end;
+    std::string_view command;
+    std::string_view env;
+    std::string_view extdata;
 };
 
 template <>
@@ -111,7 +113,7 @@ void
 trace_cache::serialize(uint8_t* buffer, const process_sample& item)
 {
     size_t position = 0;
-    utility::store_value(item.guid.c_str(), buffer, position);
+    utility::store_value(item.guid, buffer, position);
     utility::store_value(item.node_id, buffer, position);
     utility::store_value(item.parent_process_id, buffer, position);
     utility::store_value(item.process_id, buffer, position);
@@ -119,9 +121,9 @@ trace_cache::serialize(uint8_t* buffer, const process_sample& item)
     utility::store_value(item.fini, buffer, position);
     utility::store_value(item.start, buffer, position);
     utility::store_value(item.end, buffer, position);
-    utility::store_value(item.command.c_str(), buffer, position);
-    utility::store_value(item.env.c_str(), buffer, position);
-    utility::store_value(item.extdata.c_str(), buffer, position);
+    utility::store_value(item.command, buffer, position);
+    utility::store_value(item.env, buffer, position);
+    utility::store_value(item.extdata, buffer, position);
 }
 
 template <>
@@ -147,15 +149,13 @@ template <>
 size_t
 trace_cache::get_size(const process_sample& item)
 {
-    return utility::get_size_helper(item.guid.c_str()) +
-           utility::get_size_helper(item.node_id) +
+    return utility::get_size_helper(item.guid) + utility::get_size_helper(item.node_id) +
            utility::get_size_helper(item.parent_process_id) +
            utility::get_size_helper(item.process_id) +
            utility::get_size_helper(item.init) + utility::get_size_helper(item.fini) +
            utility::get_size_helper(item.start) + utility::get_size_helper(item.end) +
-           utility::get_size_helper(item.command.c_str()) +
-           utility::get_size_helper(item.env.c_str()) +
-           utility::get_size_helper(item.extdata.c_str());
+           utility::get_size_helper(item.command) + utility::get_size_helper(item.env) +
+           utility::get_size_helper(item.extdata);
 }
 
 // ---------------- Post Processing ----------------

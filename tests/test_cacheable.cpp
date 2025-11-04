@@ -1,9 +1,12 @@
 #include "cacheable.hpp"
 
 #include <array>
+#include <cstddef>
 #include <gtest/gtest.h>
 #include <string>
 #include <vector>
+
+using namespace std::string_view_literals;
 
 class CacheableTest : public ::testing::Test
 {
@@ -60,22 +63,23 @@ TEST_F(CacheableTest, store_value_unsigned_char)
 
 TEST_F(CacheableTest, store_value_string_literal)
 {
-    const char* value = "Hello World";
+    auto value = "Hello World"sv;
     trace_cache::utility::store_value(value, buffer.data(), position);
 
-    size_t expected_size = strlen(value) + 1;
+    size_t expected_size = value.size() + sizeof(size_t);
     EXPECT_EQ(position, expected_size);
 
-    std::string stored_value(reinterpret_cast<const char*>(buffer.data()));
+    std::string stored_value(
+        reinterpret_cast<const char*>(buffer.data() + sizeof(size_t)));
     EXPECT_EQ(stored_value, "Hello World");
 }
 
 TEST_F(CacheableTest, store_value_empty_string)
 {
-    const char* value = "";
+    auto value = ""sv;
     trace_cache::utility::store_value(value, buffer.data(), position);
 
-    EXPECT_EQ(position, 1);
+    EXPECT_EQ(position, sizeof(size_t));
     EXPECT_EQ(buffer[0], '\0');
 }
 
@@ -109,15 +113,16 @@ TEST_F(CacheableTest, store_value_empty_byte_array)
 
 TEST_F(CacheableTest, store_multiple_values)
 {
-    int         int_val    = 100;
-    double      double_val = 2.718;
-    const char* str_val    = "test";
+    int    int_val    = 100;
+    double double_val = 2.718;
+    auto   str_val    = "test"sv;
 
     trace_cache::utility::store_value(int_val, buffer.data(), position);
     trace_cache::utility::store_value(double_val, buffer.data(), position);
     trace_cache::utility::store_value(str_val, buffer.data(), position);
 
-    size_t expected_total = sizeof(int) + sizeof(double) + strlen(str_val) + 1;
+    size_t expected_total =
+        sizeof(int) + sizeof(double) + str_val.size() + sizeof(size_t);
     EXPECT_EQ(position, expected_total);
 }
 
@@ -162,28 +167,28 @@ TEST_F(CacheableTest, parse_value_unsigned_long)
 
 TEST_F(CacheableTest, parse_value_string)
 {
-    const char* original_value = "Parse this string";
+    auto original_value = "Parse this string"sv;
     trace_cache::utility::store_value(original_value, buffer.data(), position);
 
-    uint8_t*    data_pos = buffer.data();
-    std::string parsed_value;
+    uint8_t*         data_pos = buffer.data();
+    std::string_view parsed_value;
     trace_cache::utility::parse_value(parsed_value, data_pos);
 
     EXPECT_EQ(parsed_value, "Parse this string");
-    EXPECT_EQ(data_pos, buffer.data() + strlen(original_value) + 1);
+    EXPECT_EQ(data_pos, buffer.data() + original_value.size() + sizeof(size_t));
 }
 
 TEST_F(CacheableTest, parse_value_empty_string)
 {
-    const char* original_value = "";
+    auto original_value = ""sv;
     trace_cache::utility::store_value(original_value, buffer.data(), position);
 
-    uint8_t*    data_pos = buffer.data();
-    std::string parsed_value;
+    uint8_t*         data_pos = buffer.data();
+    std::string_view parsed_value;
     trace_cache::utility::parse_value(parsed_value, data_pos);
 
     EXPECT_EQ(parsed_value, "");
-    EXPECT_EQ(data_pos, buffer.data() + 1);
+    EXPECT_EQ(data_pos, buffer.data() + sizeof(size_t));
 }
 
 TEST_F(CacheableTest, parse_value_byte_array)
@@ -217,7 +222,7 @@ TEST_F(CacheableTest, parse_multiple_values)
 {
     int           int_val    = 42;
     double        double_val = 3.14;
-    const char*   str_val    = "multi";
+    auto          str_val    = "multi"sv;
     unsigned char uchar_val  = 128;
 
     trace_cache::utility::store_value(int_val, buffer.data(), position);
@@ -235,7 +240,7 @@ TEST_F(CacheableTest, parse_multiple_values)
     trace_cache::utility::parse_value(parsed_double, data_pos);
     EXPECT_DOUBLE_EQ(parsed_double, 3.14);
 
-    std::string parsed_string;
+    std::string_view parsed_string;
     trace_cache::utility::parse_value(parsed_string, data_pos);
     EXPECT_EQ(parsed_string, "multi");
 
@@ -260,9 +265,9 @@ TEST_F(CacheableTest, get_size_helper_double)
 
 TEST_F(CacheableTest, get_size_helper_string_literal)
 {
-    const char* value = "test string";
-    size_t      size  = trace_cache::utility::get_size_helper(value);
-    EXPECT_EQ(size, strlen(value) + 1);
+    auto   value = "test string"sv;
+    size_t size  = trace_cache::utility::get_size_helper(value);
+    EXPECT_EQ(size, value.size() + sizeof(size_t));
 }
 
 TEST_F(CacheableTest, get_size_helper_byte_array)

@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <variant>
@@ -57,13 +58,12 @@ struct typelist
     constexpr static bool is_supported = (std::is_same_v<std::decay_t<T>, Types> || ...);
 };
 
-using supported_types = typelist<const char*, char*, uint64_t, int32_t, uint32_t,
+using supported_types = typelist<std::string_view, uint64_t, int32_t, uint32_t,
                                  std::vector<uint8_t>, uint8_t, int64_t, double>;
 
 template <typename T>
-static constexpr bool is_string_literal_v =
-    std::is_same_v<std::decay_t<T>, const char*> ||
-    std::is_same_v<std::decay_t<T>, char*>;
+static constexpr bool is_string_view_v =
+    std::is_same_v<std::decay_t<T>, std::string_view>;
 
 template <typename T>
 struct is_enum_class

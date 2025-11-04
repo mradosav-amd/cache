@@ -3,7 +3,6 @@
 #include "cache_type_traits.hpp"
 #include "cacheable.hpp"
 #include "type_registry.hpp"
-#include <algorithm>
 #include <bits/chrono.h>
 #include <cassert>
 #include <cstdlib>
@@ -11,7 +10,6 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
-#include <map>
 #include <memory>
 #include <sstream>
 #include <stdint.h>
@@ -98,7 +96,6 @@ public:
             auto sample_value = m_registry.get_type(header.type, data);
             if(sample_value.has_value())
             {
-                // std::cout << "prased has value" << std::endl;
                 TypeProcessing::execute_sample_processing(
                     header.type, std::visit(
                                      [](auto& arg) -> cacheable_t& {
