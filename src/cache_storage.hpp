@@ -154,9 +154,9 @@ class buffered_storage
 
 public:
     explicit buffered_storage(std::string filepath)
-    : m_worker{ std::move(WorkerFactory::get_worker(
-          [this](ofs_t& ofs, bool force) { execute_flush(ofs, force); },
-          m_worker_synchronization, std::move(filepath))) }
+    : m_worker{ std::move(
+          WorkerFactory::get_worker([this](ofs_t& ofs, bool force) { flush(ofs, force); },
+                                    m_worker_synchronization, std::move(filepath))) }
     {}
 
     ~buffered_storage() { shutdown(); }
@@ -218,7 +218,7 @@ public:
     }
 
 private:
-    void execute_flush(ofs_t& ofs, bool force)
+    void flush(ofs_t& ofs, bool force)
     {
         size_t _head, _tail;
         {

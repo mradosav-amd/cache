@@ -133,7 +133,7 @@ TEST_F(CacheableTest, parse_value_int)
 
     uint8_t* data_pos = buffer.data();
     int      parsed_value;
-    trace_cache::utility::parse_value(parsed_value, data_pos);
+    trace_cache::utility::parse_value(data_pos, parsed_value);
 
     EXPECT_EQ(parsed_value, 987);
     EXPECT_EQ(data_pos, buffer.data() + sizeof(int));
@@ -146,7 +146,7 @@ TEST_F(CacheableTest, parse_value_double)
 
     uint8_t* data_pos = buffer.data();
     double   parsed_value;
-    trace_cache::utility::parse_value(parsed_value, data_pos);
+    trace_cache::utility::parse_value(data_pos, parsed_value);
 
     EXPECT_DOUBLE_EQ(parsed_value, 1.618033988);
     EXPECT_EQ(data_pos, buffer.data() + sizeof(double));
@@ -159,7 +159,7 @@ TEST_F(CacheableTest, parse_value_unsigned_long)
 
     uint8_t*      data_pos = buffer.data();
     unsigned long parsed_value;
-    trace_cache::utility::parse_value(parsed_value, data_pos);
+    trace_cache::utility::parse_value(data_pos, parsed_value);
 
     EXPECT_EQ(parsed_value, 0xDEADBEEF);
     EXPECT_EQ(data_pos, buffer.data() + sizeof(unsigned long));
@@ -172,7 +172,7 @@ TEST_F(CacheableTest, parse_value_string)
 
     uint8_t*         data_pos = buffer.data();
     std::string_view parsed_value;
-    trace_cache::utility::parse_value(parsed_value, data_pos);
+    trace_cache::utility::parse_value(data_pos, parsed_value);
 
     EXPECT_EQ(parsed_value, "Parse this string");
     EXPECT_EQ(data_pos, buffer.data() + original_value.size() + sizeof(size_t));
@@ -185,7 +185,7 @@ TEST_F(CacheableTest, parse_value_empty_string)
 
     uint8_t*         data_pos = buffer.data();
     std::string_view parsed_value;
-    trace_cache::utility::parse_value(parsed_value, data_pos);
+    trace_cache::utility::parse_value(data_pos, parsed_value);
 
     EXPECT_EQ(parsed_value, "");
     EXPECT_EQ(data_pos, buffer.data() + sizeof(size_t));
@@ -198,7 +198,7 @@ TEST_F(CacheableTest, parse_value_byte_array)
 
     uint8_t*             data_pos = buffer.data();
     std::vector<uint8_t> parsed_value;
-    trace_cache::utility::parse_value(parsed_value, data_pos);
+    trace_cache::utility::parse_value(data_pos, parsed_value);
 
     EXPECT_EQ(parsed_value.size(), 5);
     EXPECT_EQ(parsed_value, original_value);
@@ -212,7 +212,7 @@ TEST_F(CacheableTest, parse_value_empty_byte_array)
 
     uint8_t*             data_pos = buffer.data();
     std::vector<uint8_t> parsed_value;
-    trace_cache::utility::parse_value(parsed_value, data_pos);
+    trace_cache::utility::parse_value(data_pos, parsed_value);
 
     EXPECT_EQ(parsed_value.size(), 0);
     EXPECT_TRUE(parsed_value.empty());
@@ -232,48 +232,45 @@ TEST_F(CacheableTest, parse_multiple_values)
 
     uint8_t* data_pos = buffer.data();
 
-    int parsed_int;
-    trace_cache::utility::parse_value(parsed_int, data_pos);
-    EXPECT_EQ(parsed_int, 42);
-
-    double parsed_double;
-    trace_cache::utility::parse_value(parsed_double, data_pos);
-    EXPECT_DOUBLE_EQ(parsed_double, 3.14);
-
+    int           parsed_int;
+    double        parsed_double;
     std::string_view parsed_string;
-    trace_cache::utility::parse_value(parsed_string, data_pos);
-    EXPECT_EQ(parsed_string, "multi");
-
     unsigned char parsed_uchar;
-    trace_cache::utility::parse_value(parsed_uchar, data_pos);
+
+    trace_cache::utility::parse_value(data_pos, parsed_int, parsed_double,
+                                       parsed_string, parsed_uchar);
+
+    EXPECT_EQ(parsed_int, 42);
+    EXPECT_DOUBLE_EQ(parsed_double, 3.14);
+    EXPECT_EQ(parsed_string, "multi");
     EXPECT_EQ(parsed_uchar, 128);
 }
 
 TEST_F(CacheableTest, get_size_helper_int)
 {
     int    value = 42;
-    size_t size  = trace_cache::utility::get_size_helper(value);
+    size_t size  = trace_cache::utility::get_size(value);
     EXPECT_EQ(size, sizeof(int));
 }
 
 TEST_F(CacheableTest, get_size_helper_double)
 {
     double value = 3.14;
-    size_t size  = trace_cache::utility::get_size_helper(value);
+    size_t size  = trace_cache::utility::get_size(value);
     EXPECT_EQ(size, sizeof(double));
 }
 
 TEST_F(CacheableTest, get_size_helper_string_literal)
 {
     auto   value = "test string"sv;
-    size_t size  = trace_cache::utility::get_size_helper(value);
+    size_t size  = trace_cache::utility::get_size(value);
     EXPECT_EQ(size, value.size() + sizeof(size_t));
 }
 
 TEST_F(CacheableTest, get_size_helper_byte_array)
 {
     std::vector<uint8_t> value = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
-    size_t               size  = trace_cache::utility::get_size_helper(value);
+    size_t               size  = trace_cache::utility::get_size(value);
     EXPECT_EQ(size, value.size() + sizeof(size_t));
 }
 

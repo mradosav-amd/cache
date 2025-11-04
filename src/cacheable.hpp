@@ -36,15 +36,14 @@ const auto get_buffered_storage_filename = [](const int& ppid, const int& pid) {
     return std::string{ tmp_directory + "buffered_storage_" + std::to_string(ppid) + "_" +
                         std::to_string(pid) + ".bin" };
 };
-// helper functions
 
 template <typename Type>
 __attribute__((always_inline)) inline constexpr size_t
-get_size_helper(Type&& val)
+get_size(Type&& val)
 {
     using DecayedType = std::decay_t<Type>;
     static_assert(type_traits::supported_types::is_supported<DecayedType>,
-                  "Unsupported type in get_size_helper");
+                  "Unsupported type in get_size");
 
     if constexpr(type_traits::is_string_view_v<DecayedType> ||
                  std::is_same_v<DecayedType, std::vector<uint8_t>>)
@@ -55,6 +54,14 @@ get_size_helper(Type&& val)
     {
         return sizeof(DecayedType);
     }
+}
+
+template <typename Type, typename... Types>
+__attribute__((always_inline)) inline constexpr size_t
+get_size(Type&& val, Types&&... vals)
+{
+    return get_size(std::forward<Type>(val)) +
+           get_size(std::forward<Types>(vals)...);
 }
 
 template <typename Type>
@@ -80,11 +87,19 @@ store_value(const Type& value, uint8_t* buffer, size_t& position)
         *reinterpret_cast<DecayedType*>(dest) = value;
         position += sizeof(DecayedType);
     }
-};
+}
+
+template <typename... Types>
+__attribute__((always_inline)) inline void
+store_value(uint8_t* buffer, const Types&... values)
+{
+    size_t position = 0;
+    (store_value(values, buffer, position), ...);
+}
 
 template <typename Type>
 __attribute__((always_inline)) inline static void
-parse_value(Type& arg, uint8_t*& data_pos)
+parse_value(uint8_t*& data_pos, Type& arg)
 {
     using DecayedType = std::decay_t<Type>;
     static_assert(type_traits::supported_types::is_supported<DecayedType>,
@@ -110,6 +125,14 @@ parse_value(Type& arg, uint8_t*& data_pos)
         arg = *reinterpret_cast<const DecayedType*>(data_pos);
         data_pos += sizeof(DecayedType);
     }
+}
+
+template <typename Type, typename... Types>
+__attribute__((always_inline)) inline static void
+parse_value(uint8_t*& data_pos, Type& arg, Types&... args)
+{
+    parse_value(data_pos, arg);
+    parse_value(data_pos, args...);
 }
 
 }  // namespace utility

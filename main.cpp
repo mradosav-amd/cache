@@ -40,12 +40,8 @@ template <>
 void
 trace_cache::serialize(uint8_t* buffer, const track_sample& item)
 {
-    size_t position = 0;
-    utility::store_value(item.track_name, buffer, position);
-    utility::store_value(item.node_id, buffer, position);
-    utility::store_value(item.process_id, buffer, position);
-    utility::store_value(item.thread_id, buffer, position);
-    utility::store_value(item.extdata, buffer, position);
+    utility::store_value(buffer, item.track_name, item.node_id,
+                         item.process_id, item.thread_id, item.extdata);
 }
 
 template <>
@@ -53,11 +49,8 @@ track_sample
 trace_cache::deserialize(uint8_t*& buffer)
 {
     track_sample result;
-    utility::parse_value(result.track_name, buffer);
-    utility::parse_value(result.node_id, buffer);
-    utility::parse_value(result.process_id, buffer);
-    utility::parse_value(result.thread_id, buffer);
-    utility::parse_value(result.extdata, buffer);
+    utility::parse_value(buffer, result.track_name, result.node_id,
+                         result.process_id, result.thread_id, result.extdata);
     return result;
 }
 
@@ -65,11 +58,8 @@ template <>
 size_t
 trace_cache::get_size(const track_sample& item)
 {
-    return utility::get_size_helper(item.track_name) +
-           utility::get_size_helper(item.node_id) +
-           utility::get_size_helper(item.process_id) +
-           utility::get_size_helper(item.thread_id) +
-           utility::get_size_helper(item.extdata);
+    return utility::get_size(item.track_name, item.node_id,
+                                     item.process_id, item.thread_id, item.extdata);
 }
 
 struct process_sample : public trace_cache::cacheable_t
@@ -113,18 +103,10 @@ template <>
 void
 trace_cache::serialize(uint8_t* buffer, const process_sample& item)
 {
-    size_t position = 0;
-    utility::store_value(item.guid, buffer, position);
-    utility::store_value(item.node_id, buffer, position);
-    utility::store_value(item.parent_process_id, buffer, position);
-    utility::store_value(item.process_id, buffer, position);
-    utility::store_value(item.init, buffer, position);
-    utility::store_value(item.fini, buffer, position);
-    utility::store_value(item.start, buffer, position);
-    utility::store_value(item.end, buffer, position);
-    utility::store_value(item.command, buffer, position);
-    utility::store_value(item.env, buffer, position);
-    utility::store_value(item.extdata, buffer, position);
+    utility::store_value(buffer, item.guid, item.node_id,
+                         item.parent_process_id, item.process_id, item.init,
+                         item.fini, item.start, item.end, item.command,
+                         item.env, item.extdata);
 }
 
 template <>
@@ -132,17 +114,10 @@ process_sample
 trace_cache::deserialize(uint8_t*& buffer)
 {
     process_sample result;
-    utility::parse_value(result.guid, buffer);
-    utility::parse_value(result.node_id, buffer);
-    utility::parse_value(result.parent_process_id, buffer);
-    utility::parse_value(result.process_id, buffer);
-    utility::parse_value(result.init, buffer);
-    utility::parse_value(result.fini, buffer);
-    utility::parse_value(result.start, buffer);
-    utility::parse_value(result.end, buffer);
-    utility::parse_value(result.command, buffer);
-    utility::parse_value(result.env, buffer);
-    utility::parse_value(result.extdata, buffer);
+    utility::parse_value(buffer, result.guid, result.node_id,
+                         result.parent_process_id, result.process_id,
+                         result.init, result.fini, result.start, result.end,
+                         result.command, result.env, result.extdata);
     return result;
 }
 
@@ -150,13 +125,10 @@ template <>
 size_t
 trace_cache::get_size(const process_sample& item)
 {
-    return utility::get_size_helper(item.guid) + utility::get_size_helper(item.node_id) +
-           utility::get_size_helper(item.parent_process_id) +
-           utility::get_size_helper(item.process_id) +
-           utility::get_size_helper(item.init) + utility::get_size_helper(item.fini) +
-           utility::get_size_helper(item.start) + utility::get_size_helper(item.end) +
-           utility::get_size_helper(item.command) + utility::get_size_helper(item.env) +
-           utility::get_size_helper(item.extdata);
+    return utility::get_size(item.guid, item.node_id, item.parent_process_id,
+                                     item.process_id, item.init, item.fini,
+                                     item.start, item.end, item.command,
+                                     item.env, item.extdata);
 }
 
 // ---------------- Post Processing ----------------

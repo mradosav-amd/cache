@@ -78,9 +78,7 @@ template <>
 inline void
 trace_cache::serialize(uint8_t* buffer, const test_sample_1& item)
 {
-    size_t position = 0;
-    trace_cache::utility::store_value(item.value, buffer, position);
-    trace_cache::utility::store_value(item.text, buffer, position);
+    trace_cache::utility::store_value(buffer, item.value, item.text);
 }
 
 template <>
@@ -88,8 +86,7 @@ inline test_sample_1
 trace_cache::deserialize(uint8_t*& buffer)
 {
     test_sample_1 result;
-    trace_cache::utility::parse_value(result.value, buffer);
-    trace_cache::utility::parse_value(result.text, buffer);
+    trace_cache::utility::parse_value(buffer, result.value, result.text);
     return result;
 }
 
@@ -97,17 +94,14 @@ template <>
 inline size_t
 trace_cache::get_size(const test_sample_1& item)
 {
-    return trace_cache::utility::get_size_helper(item.value) +
-           trace_cache::utility::get_size_helper(item.text);
+    return trace_cache::utility::get_size(item.value, item.text);
 }
 
 template <>
 inline void
 trace_cache::serialize(uint8_t* buffer, const test_sample_2& item)
 {
-    size_t position = 0;
-    trace_cache::utility::store_value(item.data, buffer, position);
-    trace_cache::utility::store_value(item.sample_id, buffer, position);
+    trace_cache::utility::store_value(buffer, item.data, item.sample_id);
 }
 
 template <>
@@ -115,8 +109,7 @@ inline test_sample_2
 trace_cache::deserialize(uint8_t*& buffer)
 {
     test_sample_2 result;
-    trace_cache::utility::parse_value(result.data, buffer);
-    trace_cache::utility::parse_value(result.sample_id, buffer);
+    trace_cache::utility::parse_value(buffer, result.data, result.sample_id);
     return result;
 }
 
@@ -124,16 +117,14 @@ template <>
 inline size_t
 trace_cache::get_size(const test_sample_2& item)
 {
-    return trace_cache::utility::get_size_helper(item.data) +
-           trace_cache::utility::get_size_helper(item.sample_id);
+    return trace_cache::utility::get_size(item.data, item.sample_id);
 }
 
 template <>
 inline void
 trace_cache::serialize(uint8_t* buffer, const test_sample_3& item)
 {
-    size_t position = 0;
-    trace_cache::utility::store_value(item.payload, buffer, position);
+    trace_cache::utility::store_value(buffer, item.payload);
 }
 
 template <>
@@ -141,7 +132,7 @@ inline test_sample_3
 trace_cache::deserialize(uint8_t*& buffer)
 {
     test_sample_3 result;
-    trace_cache::utility::parse_value(result.payload, buffer);
+    trace_cache::utility::parse_value(buffer, result.payload);
     return result;
 }
 
@@ -149,5 +140,5 @@ template <>
 inline size_t
 trace_cache::get_size(const test_sample_3& item)
 {
-    return trace_cache::utility::get_size_helper(item.payload);
+    return trace_cache::utility::get_size(item.payload);
 }
