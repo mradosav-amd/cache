@@ -3,6 +3,7 @@
 #include "src/storage_parser.hpp"
 #include <memory>
 #include <string>
+#include <unistd.h>
 
 // ---------------- Samples Definitions ----------------
 
@@ -160,44 +161,86 @@ trace_cache::get_size(const process_sample& item)
 
 // ---------------- Post Processing ----------------
 
+template <typename T>
 struct handler_t
 {
-    virtual ~handler_t()                               = default;
-    virtual void handle_track(const track_sample&)     = 0;
-    virtual void handle_process(const process_sample&) = 0;
+    void handle_track(const track_sample& track)
+    {
+        static_cast<T*>(this)->handle_track_impl(track);
+    }
+
+    void handle_process(const process_sample& process)
+    {
+        static_cast<T*>(this)->handle_process_impl(process);
+    }
+
+protected:
+    ~handler_t() = default;
 };
-struct rocpd_format_handler_t : handler_t
+
+struct rocpd_format_handler_t : handler_t<rocpd_format_handler_t>
 {
-    void handle_track(const track_sample& track) override
+    void handle_track_impl(const track_sample& track)
     {
         std::cout << "rocpd_format: " << track.track_name << std::endl;
-    };
+    }
 
-    void handle_process(const process_sample& process) override
+    void handle_process_impl(const process_sample& process)
     {
         std::cout << "rocpd_format: " << process.command << std::endl;
-    };
+    }
 };
-struct perfetto_format_handler_t : handler_t
+
+struct perfetto_format_handler_t : handler_t<perfetto_format_handler_t>
 {
-    void handle_track(const track_sample& track) override
+    void handle_track_impl(const track_sample& track)
     {
         std::cout << "perfetto_format: " << track.track_name << std::endl;
-    };
+    }
 
-    void handle_process(const process_sample& process) override
+    void handle_process_impl(const process_sample& process)
     {
         std::cout << "perfetto_format: " << process.command << std::endl;
-    };
+    }
+};
+
+struct handler_view
+{
+    template <typename T>
+    explicit handler_view(T& t)
+    : object{ &t }
+    , handle_track_impl{ [](void* obj, const track_sample& track) {
+        static_cast<T*>(obj)->handle_track(track);
+    } }
+    , handle_process_impl{ [](void* obj, const process_sample& process) {
+        static_cast<T*>(obj)->handle_process(process);
+    } }
+    {}
+
+    void handle_track(const track_sample& track) const
+    {
+        handle_track_impl(object, track);
+    }
+
+    void handle_process(const process_sample& process) const
+    {
+        handle_process_impl(object, process);
+    }
+
+private:
+    void*                                             object;
+    std::function<void(void*, const track_sample&)>   handle_track_impl;
+    std::function<void(void*, const process_sample&)> handle_process_impl;
 };
 
 struct type_processing_t
 {
     static void clear_formats() { s_enabled_formats.clear(); }
 
-    static void add_format(std::unique_ptr<handler_t> format)
+    template <typename T>
+    static void add_format(T& format)
     {
-        s_enabled_formats.push_back(std::move(format));
+        s_enabled_formats.emplace_back(format);
     }
 
     static void execute_sample_processing(type_identifier_t               type_identifier,
@@ -209,14 +252,12 @@ struct type_processing_t
             {
                 case type_identifier_t::track_sample:
                 {
-                    auto track = static_cast<const track_sample&>(value);
-                    handler->handle_track(track);
+                    handler.handle_track(static_cast<const track_sample&>(value));
                     break;
                 }
                 case type_identifier_t::process_sample:
                 {
-                    auto process = static_cast<const process_sample&>(value);
-                    handler->handle_process(process);
+                    handler.handle_process(static_cast<const process_sample&>(value));
                     break;
                 }
                 default: break;
@@ -225,10 +266,10 @@ struct type_processing_t
     }
 
 private:
-    static std::vector<std::unique_ptr<handler_t>> s_enabled_formats;
+    static std::vector<handler_view> s_enabled_formats;
 };
 
-std::vector<std::unique_ptr<handler_t>> type_processing_t::s_enabled_formats{};
+std::vector<handler_view> type_processing_t::s_enabled_formats{};
 
 // ---------------- Example ----------------
 
@@ -281,7 +322,8 @@ run_multithread_example()
     buffered_storage.shutdown();
 
     // Prepare formats
-    type_processing_t::add_format(std::make_unique<rocpd_format_handler_t>());
+    rocpd_format_handler_t rocpd_handler;
+    type_processing_t::add_format(rocpd_handler);
 
     trace_cache::storage_parser<type_identifier_t, type_processing_t, track_sample,
                                 process_sample>
