@@ -5,10 +5,12 @@
 #include <atomic>
 #include <chrono>
 #include <gtest/gtest.h>
+#include <memory>
 #include <random>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace
@@ -51,140 +53,137 @@ struct sample_3_hash
         return h;
     }
 };
+
 }  // namespace
 
-struct integration_processing_tracker
+class integration_sample_processor_t
 {
-    std::atomic<int> sample_1_count{ 0 };
-    std::atomic<int> sample_2_count{ 0 };
-    std::atomic<int> sample_3_count{ 0 };
-
-    std::unordered_map<test_sample_1, int, sample_1_hash> expected_samples_1;
-    std::unordered_map<test_sample_2, int, sample_2_hash> expected_samples_2;
-    std::unordered_map<test_sample_3, int, sample_3_hash> expected_samples_3;
-    std::mutex                                            data_mutex;
-
-    void reset()
-    {
-        sample_1_count = 0;
-        sample_2_count = 0;
-        sample_3_count = 0;
-
-        std::lock_guard<std::mutex> lock(data_mutex);
-        expected_samples_1.clear();
-        expected_samples_2.clear();
-        expected_samples_3.clear();
-    }
+public:
+    integration_sample_processor_t() = default;
 
     void set_expected_samples_1(const std::vector<test_sample_1>& samples)
     {
-        std::lock_guard<std::mutex> lock(data_mutex);
-        expected_samples_1.clear();
+        std::lock_guard<std::mutex> lock(m_data_mutex);
+        m_expected_samples_1.clear();
         for(const auto& s : samples)
         {
-            expected_samples_1[s]++;
+            m_expected_samples_1[s]++;
         }
     }
 
     void set_expected_samples_2(const std::vector<test_sample_2>& samples)
     {
-        std::lock_guard<std::mutex> lock(data_mutex);
-        expected_samples_2.clear();
+        std::lock_guard<std::mutex> lock(m_data_mutex);
+        m_expected_samples_2.clear();
         for(const auto& s : samples)
         {
-            expected_samples_2[s]++;
+            m_expected_samples_2[s]++;
         }
     }
 
     void set_expected_samples_3(const std::vector<test_sample_3>& samples)
     {
-        std::lock_guard<std::mutex> lock(data_mutex);
-        expected_samples_3.clear();
+        std::lock_guard<std::mutex> lock(m_data_mutex);
+        m_expected_samples_3.clear();
         for(const auto& s : samples)
         {
-            expected_samples_3[s]++;
+            m_expected_samples_3[s]++;
         }
     }
 
+    void execute_sample_processing(test_type_identifier_t          type_identifier,
+                                    const trace_cache::cacheable_t& value)
+    {
+        switch(type_identifier)
+        {
+            case test_type_identifier_t::sample_type_1:
+            {
+                const auto&                 sample = static_cast<const test_sample_1&>(value);
+                std::lock_guard<std::mutex> lock(m_data_mutex);
+                m_sample_1_count++;
+                check_sample_1(sample);
+                break;
+            }
+            case test_type_identifier_t::sample_type_2:
+            {
+                const auto&                 sample = static_cast<const test_sample_2&>(value);
+                std::lock_guard<std::mutex> lock(m_data_mutex);
+                m_sample_2_count++;
+                check_sample_2(sample);
+                break;
+            }
+            case test_type_identifier_t::sample_type_3:
+            {
+                const auto&                 sample = static_cast<const test_sample_3&>(value);
+                std::lock_guard<std::mutex> lock(m_data_mutex);
+                m_sample_3_count++;
+                check_sample_3(sample);
+                break;
+            }
+            default: break;
+        }
+    }
+
+    int  get_sample_1_count() const { return m_sample_1_count.load(); }
+    int  get_sample_2_count() const { return m_sample_2_count.load(); }
+    int  get_sample_3_count() const { return m_sample_3_count.load(); }
+    bool all_expected_samples_found() const
+    {
+        std::lock_guard<std::mutex> lock(m_data_mutex);
+        return m_expected_samples_1.empty() && m_expected_samples_2.empty() &&
+               m_expected_samples_3.empty();
+    }
+
+private:
     void check_sample_1(const test_sample_1& sample)
     {
-        auto it = expected_samples_1.find(sample);
-        EXPECT_NE(it, expected_samples_1.end());
-        if(it != expected_samples_1.end())
+        auto it = m_expected_samples_1.find(sample);
+        EXPECT_NE(it, m_expected_samples_1.end());
+        if(it != m_expected_samples_1.end())
         {
             it->second--;
             if(it->second == 0)
             {
-                expected_samples_1.erase(it);
+                m_expected_samples_1.erase(it);
             }
         }
     }
 
     void check_sample_2(const test_sample_2& sample)
     {
-        auto it = expected_samples_2.find(sample);
-        EXPECT_NE(it, expected_samples_2.end());
-        if(it != expected_samples_2.end())
+        auto it = m_expected_samples_2.find(sample);
+        EXPECT_NE(it, m_expected_samples_2.end());
+        if(it != m_expected_samples_2.end())
         {
             it->second--;
             if(it->second == 0)
             {
-                expected_samples_2.erase(it);
+                m_expected_samples_2.erase(it);
             }
         }
     }
 
     void check_sample_3(const test_sample_3& sample)
     {
-        auto it = expected_samples_3.find(sample);
-        EXPECT_NE(it, expected_samples_3.end());
-        if(it != expected_samples_3.end())
+        auto it = m_expected_samples_3.find(sample);
+        EXPECT_NE(it, m_expected_samples_3.end());
+        if(it != m_expected_samples_3.end())
         {
             it->second--;
             if(it->second == 0)
             {
-                expected_samples_3.erase(it);
+                m_expected_samples_3.erase(it);
             }
         }
     }
-};
 
-static integration_processing_tracker g_tracker;
-
-struct integration_sample_processor_t
-{
-    static void execute_sample_processing(test_type_identifier_t          type_identifier,
-                                          const trace_cache::cacheable_t& value)
-    {
-        switch(type_identifier)
-        {
-            case test_type_identifier_t::sample_type_1:
-            {
-                const auto& sample = static_cast<const test_sample_1&>(value);
-                std::lock_guard<std::mutex> lock(g_tracker.data_mutex);
-                g_tracker.sample_1_count++;
-                g_tracker.check_sample_1(sample);
-                break;
-            }
-            case test_type_identifier_t::sample_type_2:
-            {
-                const auto& sample = static_cast<const test_sample_2&>(value);
-                std::lock_guard<std::mutex> lock(g_tracker.data_mutex);
-                g_tracker.sample_2_count++;
-                g_tracker.check_sample_2(sample);
-                break;
-            }
-            case test_type_identifier_t::sample_type_3:
-            {
-                const auto& sample = static_cast<const test_sample_3&>(value);
-                std::lock_guard<std::mutex> lock(g_tracker.data_mutex);
-                g_tracker.sample_3_count++;
-                g_tracker.check_sample_3(sample);
-                break;
-            }
-            default: break;
-        }
-    }
+    std::atomic<int>                                      m_sample_1_count{ 0 };
+    std::atomic<int>                                      m_sample_2_count{ 0 };
+    std::atomic<int>                                      m_sample_3_count{ 0 };
+    std::unordered_map<test_sample_1, int, sample_1_hash> m_expected_samples_1;
+    std::unordered_map<test_sample_2, int, sample_2_hash> m_expected_samples_2;
+    std::unordered_map<test_sample_3, int, sample_3_hash> m_expected_samples_3;
+    mutable std::mutex                                    m_data_mutex;
 };
 
 class CachingModuleIntegrationTest : public ::testing::Test
@@ -195,14 +194,9 @@ protected:
         test_file_path =
             "integration_test_cache_" + std::to_string(test_counter++) + ".bin";
         std::remove(test_file_path.c_str());
-        g_tracker.reset();
     }
 
-    void TearDown() override
-    {
-        std::remove(test_file_path.c_str());
-        g_tracker.reset();
-    }
+    void TearDown() override { std::remove(test_file_path.c_str()); }
 
     std::string             test_file_path;
     static std::atomic<int> test_counter;
@@ -253,18 +247,20 @@ TEST_F(CachingModuleIntegrationTest, buffer_fragmentation_handling)
         storage.shutdown();
     }
 
-    g_tracker.set_expected_samples_1(expected_1);
-    g_tracker.set_expected_samples_3(expected_3);
+    auto processor = std::make_unique<integration_sample_processor_t>();
+    processor->set_expected_samples_1(expected_1);
+    processor->set_expected_samples_3(expected_3);
+    auto processor_ptr = processor.get();
 
     trace_cache::storage_parser<test_type_identifier_t, integration_sample_processor_t,
                                 test_sample_1, test_sample_2, test_sample_3>
-        parser(test_file_path);
+        parser(test_file_path, std::move(processor));
 
     parser.load();
 
-    EXPECT_EQ(g_tracker.sample_1_count, 100);
-    EXPECT_EQ(g_tracker.sample_3_count, 50);
-    EXPECT_EQ(g_tracker.sample_1_count + g_tracker.sample_3_count, 150);
+    EXPECT_EQ(processor_ptr->get_sample_1_count(), 100);
+    EXPECT_EQ(processor_ptr->get_sample_3_count(), 50);
+    EXPECT_EQ(processor_ptr->get_sample_1_count() + processor_ptr->get_sample_3_count(), 150);
 }
 
 TEST_F(CachingModuleIntegrationTest, content_validation_edge_cases)
@@ -334,18 +330,20 @@ TEST_F(CachingModuleIntegrationTest, content_validation_edge_cases)
         storage.shutdown();
     }
 
-    g_tracker.set_expected_samples_1(expected_1);
-    g_tracker.set_expected_samples_2(expected_2);
-    g_tracker.set_expected_samples_3(expected_3);
+    auto processor = std::make_unique<integration_sample_processor_t>();
+    processor->set_expected_samples_1(expected_1);
+    processor->set_expected_samples_2(expected_2);
+    processor->set_expected_samples_3(expected_3);
+    auto processor_ptr = processor.get();
 
     trace_cache::storage_parser<test_type_identifier_t, integration_sample_processor_t,
                                 test_sample_1, test_sample_2, test_sample_3>
-        parser(test_file_path);
+        parser(test_file_path, std::move(processor));
     parser.load();
 
-    EXPECT_EQ(g_tracker.sample_1_count, 4);
-    EXPECT_EQ(g_tracker.sample_2_count, 4);
-    EXPECT_EQ(g_tracker.sample_3_count, 3);
+    EXPECT_EQ(processor_ptr->get_sample_1_count(), 4);
+    EXPECT_EQ(processor_ptr->get_sample_2_count(), 4);
+    EXPECT_EQ(processor_ptr->get_sample_3_count(), 3);
 }
 
 TEST_F(CachingModuleIntegrationTest, stress_test_multiple_fragmentations)
@@ -385,14 +383,16 @@ TEST_F(CachingModuleIntegrationTest, stress_test_multiple_fragmentations)
         storage.shutdown();
     }
 
-    g_tracker.set_expected_samples_1(expected_1);
+    auto processor = std::make_unique<integration_sample_processor_t>();
+    processor->set_expected_samples_1(expected_1);
+    auto processor_ptr = processor.get();
 
     trace_cache::storage_parser<test_type_identifier_t, integration_sample_processor_t,
                                 test_sample_1, test_sample_2, test_sample_3>
-        parser(test_file_path);
+        parser(test_file_path, std::move(processor));
     parser.load();
 
-    EXPECT_EQ(g_tracker.sample_1_count, iterations * samples_per_iteration);
+    EXPECT_EQ(processor_ptr->get_sample_1_count(), iterations * samples_per_iteration);
 }
 
 TEST_F(CachingModuleIntegrationTest, performance_write_test)
@@ -441,14 +441,16 @@ TEST_F(CachingModuleIntegrationTest, performance_write_test)
     EXPECT_LT(avg_write_time, 50.0);
     EXPECT_GT(throughput, 10 * 1024.0);
 
-    g_tracker.set_expected_samples_1(samples);
+    auto processor = std::make_unique<integration_sample_processor_t>();
+    processor->set_expected_samples_1(samples);
+    auto processor_ptr = processor.get();
 
     trace_cache::storage_parser<test_type_identifier_t, integration_sample_processor_t,
                                 test_sample_1, test_sample_2, test_sample_3>
-        parser(test_file_path);
+        parser(test_file_path, std::move(processor));
     parser.load();
 
-    EXPECT_EQ(g_tracker.sample_1_count, sample_count);
+    EXPECT_EQ(processor_ptr->get_sample_1_count(), sample_count);
 }
 
 TEST_F(CachingModuleIntegrationTest, concurrent_write_read_validation)
@@ -522,13 +524,15 @@ TEST_F(CachingModuleIntegrationTest, concurrent_write_read_validation)
     }
     EXPECT_EQ(total_written, total_samples);
 
-    g_tracker.set_expected_samples_1(expected_1);
+    auto processor = std::make_unique<integration_sample_processor_t>();
+    processor->set_expected_samples_1(expected_1);
+    auto processor_ptr = processor.get();
 
     trace_cache::storage_parser<test_type_identifier_t, integration_sample_processor_t,
                                 test_sample_1, test_sample_2, test_sample_3>
-        parser(test_file_path);
+        parser(test_file_path, std::move(processor));
     parser.load();
 
-    EXPECT_EQ(g_tracker.sample_1_count, total_samples);
-    EXPECT_TRUE(g_tracker.expected_samples_1.empty());
+    EXPECT_EQ(processor_ptr->get_sample_1_count(), total_samples);
+    EXPECT_TRUE(processor_ptr->all_expected_samples_found());
 }

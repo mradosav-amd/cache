@@ -29,13 +29,13 @@ class storage_parser
 
     static_assert(type_traits::has_execute_processing<TypeProcessing, TypeIdentifierEnum,
                                                       cacheable_t>::value,
-                  "TypeProcessing must have proper execute processing function "
-                  "TypeProcessing::execute_sample_processing(TypeIdentifierEnum, const "
-                  "cacheable_t&)");
+                  "TypeProcessing must have member function "
+                  "execute_sample_processing(TypeIdentifierEnum, const cacheable_t&)");
 
 public:
-    storage_parser(std::string _filename)
+    storage_parser(std::string _filename, std::unique_ptr<TypeProcessing> _type_processing)
     : m_filename(std::move(_filename))
+    , m_type_processing(std::move(_type_processing))
     {}
 
     void register_on_finished_callback(std::unique_ptr<std::function<void()>> callback)
@@ -105,7 +105,7 @@ public:
             auto sample_value = m_registry.get_type(header.type, data);
             if(sample_value.has_value())
             {
-                TypeProcessing::execute_sample_processing(
+                m_type_processing->execute_sample_processing(
                     header.type, std::visit(
                                      [](auto& arg) -> cacheable_t& {
                                          return static_cast<cacheable_t&>(arg);
@@ -133,6 +133,7 @@ public:
 
 private:
     std::string                            m_filename;
+    std::unique_ptr<TypeProcessing>        m_type_processing;
     std::unique_ptr<std::function<void()>> m_on_finished_callback{ nullptr };
     type_registry<TypeIdentifierEnum, SupportedTypes...> m_registry;
 };

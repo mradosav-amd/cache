@@ -6,113 +6,104 @@
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
+#include <memory>
 #include <numeric>
 #include <vector>
 
-struct processing_tracker
+class sample_processor_t
 {
-    std::atomic<int> sample_1_count{ 0 };
-    std::atomic<int> sample_2_count{ 0 };
-    std::atomic<int> sample_3_count{ 0 };
-    std::atomic<int> unknown_count{ 0 };
-
-    std::vector<test_sample_1> expected_samples_1;
-    std::vector<test_sample_2> expected_samples_2;
-    std::vector<test_sample_3> expected_samples_3;
-    std::mutex                 data_mutex;
-
-    void reset()
-    {
-        sample_1_count = 0;
-        sample_2_count = 0;
-        sample_3_count = 0;
-        unknown_count  = 0;
-
-        std::lock_guard<std::mutex> lock(data_mutex);
-        expected_samples_1.clear();
-        expected_samples_2.clear();
-        expected_samples_3.clear();
-    }
+public:
+    sample_processor_t() = default;
 
     void set_expected_samples_1(const std::vector<test_sample_1>& samples)
     {
-        std::lock_guard<std::mutex> lock(data_mutex);
-        expected_samples_1 = samples;
+        std::lock_guard<std::mutex> lock(m_data_mutex);
+        m_expected_samples_1 = samples;
     }
 
     void set_expected_samples_2(const std::vector<test_sample_2>& samples)
     {
-        std::lock_guard<std::mutex> lock(data_mutex);
-        expected_samples_2 = samples;
+        std::lock_guard<std::mutex> lock(m_data_mutex);
+        m_expected_samples_2 = samples;
     }
 
     void set_expected_samples_3(const std::vector<test_sample_3>& samples)
     {
-        std::lock_guard<std::mutex> lock(data_mutex);
-        expected_samples_3 = samples;
+        std::lock_guard<std::mutex> lock(m_data_mutex);
+        m_expected_samples_3 = samples;
     }
 
-    void check_sample_1(size_t index, const test_sample_1& sample)
-    {
-        if(index < expected_samples_1.size())
-        {
-            EXPECT_EQ(expected_samples_1[index], sample);
-        }
-    }
-
-    void check_sample_2(size_t index, const test_sample_2& sample)
-    {
-        if(index < expected_samples_2.size())
-        {
-            EXPECT_EQ(expected_samples_2[index], sample);
-        }
-    }
-
-    void check_sample_3(size_t index, const test_sample_3& sample)
-    {
-        if(index < expected_samples_3.size())
-        {
-            EXPECT_EQ(expected_samples_3[index], sample);
-        }
-    }
-};
-
-static processing_tracker g_tracker;
-
-struct sample_processor_t
-{
-    static void execute_sample_processing(test_type_identifier_t          type_identifier,
-                                          const trace_cache::cacheable_t& value)
+    void execute_sample_processing(test_type_identifier_t          type_identifier,
+                                    const trace_cache::cacheable_t& value)
     {
         switch(type_identifier)
         {
             case test_type_identifier_t::sample_type_1:
             {
-                const auto& sample = static_cast<const test_sample_1&>(value);
-                std::lock_guard<std::mutex> lock(g_tracker.data_mutex);
-                size_t                      idx = g_tracker.sample_1_count++;
-                g_tracker.check_sample_1(idx, sample);
+                const auto&                 sample = static_cast<const test_sample_1&>(value);
+                std::lock_guard<std::mutex> lock(m_data_mutex);
+                size_t                      idx = m_sample_1_count++;
+                check_sample_1(idx, sample);
                 break;
             }
             case test_type_identifier_t::sample_type_2:
             {
-                const auto& sample = static_cast<const test_sample_2&>(value);
-                std::lock_guard<std::mutex> lock(g_tracker.data_mutex);
-                size_t                      idx = g_tracker.sample_2_count++;
-                g_tracker.check_sample_2(idx, sample);
+                const auto&                 sample = static_cast<const test_sample_2&>(value);
+                std::lock_guard<std::mutex> lock(m_data_mutex);
+                size_t                      idx = m_sample_2_count++;
+                check_sample_2(idx, sample);
                 break;
             }
             case test_type_identifier_t::sample_type_3:
             {
-                const auto& sample = static_cast<const test_sample_3&>(value);
-                std::lock_guard<std::mutex> lock(g_tracker.data_mutex);
-                size_t                      idx = g_tracker.sample_3_count++;
-                g_tracker.check_sample_3(idx, sample);
+                const auto&                 sample = static_cast<const test_sample_3&>(value);
+                std::lock_guard<std::mutex> lock(m_data_mutex);
+                size_t                      idx = m_sample_3_count++;
+                check_sample_3(idx, sample);
                 break;
             }
-            default: g_tracker.unknown_count++; break;
+            default: m_unknown_count++; break;
         }
     }
+
+    int get_sample_1_count() const { return m_sample_1_count.load(); }
+    int get_sample_2_count() const { return m_sample_2_count.load(); }
+    int get_sample_3_count() const { return m_sample_3_count.load(); }
+    int get_unknown_count() const { return m_unknown_count.load(); }
+
+private:
+    void check_sample_1(size_t index, const test_sample_1& sample)
+    {
+        if(index < m_expected_samples_1.size())
+        {
+            EXPECT_EQ(m_expected_samples_1[index], sample);
+        }
+    }
+
+    void check_sample_2(size_t index, const test_sample_2& sample)
+    {
+        if(index < m_expected_samples_2.size())
+        {
+            EXPECT_EQ(m_expected_samples_2[index], sample);
+        }
+    }
+
+    void check_sample_3(size_t index, const test_sample_3& sample)
+    {
+        if(index < m_expected_samples_3.size())
+        {
+            EXPECT_EQ(m_expected_samples_3[index], sample);
+        }
+    }
+
+    std::atomic<int>           m_sample_1_count{ 0 };
+    std::atomic<int>           m_sample_2_count{ 0 };
+    std::atomic<int>           m_sample_3_count{ 0 };
+    std::atomic<int>           m_unknown_count{ 0 };
+    std::vector<test_sample_1> m_expected_samples_1;
+    std::vector<test_sample_2> m_expected_samples_2;
+    std::vector<test_sample_3> m_expected_samples_3;
+    std::mutex                 m_data_mutex;
 };
 
 struct __attribute__((packed)) sample_header
@@ -128,14 +119,9 @@ protected:
     {
         test_file_path = "test_storage_parser_" + std::to_string(test_counter++) + ".bin";
         cleanup_test_file();
-        g_tracker.reset();
     }
 
-    void TearDown() override
-    {
-        cleanup_test_file();
-        g_tracker.reset();
-    }
+    void TearDown() override { cleanup_test_file(); }
 
     void cleanup_test_file() { std::remove(test_file_path.c_str()); }
 
@@ -186,15 +172,18 @@ TEST_F(StorageParserTest, load_empty_file)
     std::ofstream ofs(test_file_path, std::ios::binary);
     ofs.close();
 
+    auto processor = std::make_unique<sample_processor_t>();
+    auto processor_ptr = processor.get();
+
     trace_cache::storage_parser<test_type_identifier_t, sample_processor_t, test_sample_1,
                                 test_sample_2, test_sample_3>
-        parser(test_file_path);
+        parser(test_file_path, std::move(processor));
 
     EXPECT_NO_THROW(parser.load());
 
-    EXPECT_EQ(g_tracker.sample_1_count, 0);
-    EXPECT_EQ(g_tracker.sample_2_count, 0);
-    EXPECT_EQ(g_tracker.sample_3_count, 0);
+    EXPECT_EQ(processor_ptr->get_sample_1_count(), 0);
+    EXPECT_EQ(processor_ptr->get_sample_2_count(), 0);
+    EXPECT_EQ(processor_ptr->get_sample_3_count(), 0);
 
     EXPECT_FALSE(std::filesystem::exists(test_file_path));
 }
@@ -206,17 +195,19 @@ TEST_F(StorageParserTest, load_single_sample_type_1)
 
     create_test_file_with_samples(samples_1, {}, {});
 
+    auto processor = std::make_unique<sample_processor_t>();
+    processor->set_expected_samples_1(samples_1);
+    auto processor_ptr = processor.get();
+
     trace_cache::storage_parser<test_type_identifier_t, sample_processor_t, test_sample_1,
                                 test_sample_2, test_sample_3>
-        parser(test_file_path);
-
-    g_tracker.set_expected_samples_1(samples_1);
+        parser(test_file_path, std::move(processor));
 
     EXPECT_NO_THROW(parser.load());
 
-    EXPECT_EQ(g_tracker.sample_1_count, 2);
-    EXPECT_EQ(g_tracker.sample_2_count, 0);
-    EXPECT_EQ(g_tracker.sample_3_count, 0);
+    EXPECT_EQ(processor_ptr->get_sample_1_count(), 2);
+    EXPECT_EQ(processor_ptr->get_sample_2_count(), 0);
+    EXPECT_EQ(processor_ptr->get_sample_3_count(), 0);
 
     EXPECT_NE(std::remove(test_file_path.c_str()), 0);
 }
@@ -224,27 +215,27 @@ TEST_F(StorageParserTest, load_single_sample_type_1)
 TEST_F(StorageParserTest, load_multiple_sample_types)
 {
     std::vector<test_sample_1> samples_1 = { test_sample_1(123, "mixed_test") };
-
     std::vector<test_sample_2> samples_2 = { test_sample_2(3.14159, 555),
                                              test_sample_2(2.71828, 777) };
-
     std::vector<test_sample_3> samples_3 = { test_sample_3({ 0x01, 0x02, 0x03 }) };
 
     create_test_file_with_samples(samples_1, samples_2, samples_3);
 
+    auto processor = std::make_unique<sample_processor_t>();
+    processor->set_expected_samples_1(samples_1);
+    processor->set_expected_samples_2(samples_2);
+    processor->set_expected_samples_3(samples_3);
+    auto processor_ptr = processor.get();
+
     trace_cache::storage_parser<test_type_identifier_t, sample_processor_t, test_sample_1,
                                 test_sample_2, test_sample_3>
-        parser(test_file_path);
-
-    g_tracker.set_expected_samples_1(samples_1);
-    g_tracker.set_expected_samples_2(samples_2);
-    g_tracker.set_expected_samples_3(samples_3);
+        parser(test_file_path, std::move(processor));
 
     EXPECT_NO_THROW(parser.load());
 
-    EXPECT_EQ(g_tracker.sample_1_count, 1);
-    EXPECT_EQ(g_tracker.sample_2_count, 2);
-    EXPECT_EQ(g_tracker.sample_3_count, 1);
+    EXPECT_EQ(processor_ptr->get_sample_1_count(), 1);
+    EXPECT_EQ(processor_ptr->get_sample_2_count(), 2);
+    EXPECT_EQ(processor_ptr->get_sample_3_count(), 1);
 
     EXPECT_NE(std::remove(test_file_path.c_str()), 0);
 }
@@ -252,26 +243,26 @@ TEST_F(StorageParserTest, load_multiple_sample_types)
 TEST_F(StorageParserTest, load_unsupported_sample_type)
 {
     std::vector<test_sample_1> samples_1 = { test_sample_1(123, "mixed_test") };
-
     std::vector<test_sample_2> samples_2 = { test_sample_2(3.14159, 555),
                                              test_sample_2(2.71828, 777) };
-
     std::vector<test_sample_3> samples_3 = { test_sample_3({ 0x01, 0x02, 0x03 }) };
 
     create_test_file_with_samples(samples_1, samples_2, samples_3);
 
+    auto processor = std::make_unique<sample_processor_t>();
+    processor->set_expected_samples_1(samples_1);
+    processor->set_expected_samples_2(samples_2);
+    auto processor_ptr = processor.get();
+
     trace_cache::storage_parser<test_type_identifier_t, sample_processor_t, test_sample_1,
                                 test_sample_2>
-        parser(test_file_path);
-
-    g_tracker.set_expected_samples_1(samples_1);
-    g_tracker.set_expected_samples_2(samples_2);
+        parser(test_file_path, std::move(processor));
 
     EXPECT_NO_THROW(parser.load());
 
-    EXPECT_EQ(g_tracker.sample_1_count, 1);
-    EXPECT_EQ(g_tracker.sample_2_count, 2);
-    EXPECT_EQ(g_tracker.sample_3_count, 0);
+    EXPECT_EQ(processor_ptr->get_sample_1_count(), 1);
+    EXPECT_EQ(processor_ptr->get_sample_2_count(), 2);
+    EXPECT_EQ(processor_ptr->get_sample_3_count(), 0);
 
     EXPECT_NE(std::remove(test_file_path.c_str()), 0);
 }
@@ -302,23 +293,27 @@ TEST_F(StorageParserTest, load_file_with_zero_sized_samples)
         ofs.close();
     }
 
+    auto processor = std::make_unique<sample_processor_t>();
+    processor->set_expected_samples_1({ valid_sample });
+    auto processor_ptr = processor.get();
+
     trace_cache::storage_parser<test_type_identifier_t, sample_processor_t, test_sample_1,
                                 test_sample_2, test_sample_3>
-        parser(test_file_path);
-
-    g_tracker.set_expected_samples_1({ valid_sample });
+        parser(test_file_path, std::move(processor));
 
     EXPECT_NO_THROW(parser.load());
-    EXPECT_EQ(g_tracker.sample_1_count, 1);
+    EXPECT_EQ(processor_ptr->get_sample_1_count(), 1);
 
     EXPECT_NE(std::remove(test_file_path.c_str()), 0);
 }
 
 TEST_F(StorageParserTest, load_nonexisting_file)
 {
+    auto processor = std::make_unique<sample_processor_t>();
+
     trace_cache::storage_parser<test_type_identifier_t, sample_processor_t, test_sample_1,
                                 test_sample_2, test_sample_3>
-        parser("non_existent_file.bin");
+        parser("non_existent_file.bin", std::move(processor));
 
     EXPECT_THROW(parser.load(), std::runtime_error);
 }
@@ -333,18 +328,20 @@ TEST_F(StorageParserTest, FinishedCallbackRegistrationAndExecution)
     auto callback        = std::make_unique<std::function<void()>>(
         [&callback_called]() { callback_called = true; });
 
+    auto processor = std::make_unique<sample_processor_t>();
+    processor->set_expected_samples_1(samples_1);
+    auto processor_ptr = processor.get();
+
     trace_cache::storage_parser<test_type_identifier_t, sample_processor_t, test_sample_1,
                                 test_sample_2, test_sample_3>
-        parser(test_file_path);
+        parser(test_file_path, std::move(processor));
 
     parser.register_on_finished_callback(std::move(callback));
-
-    g_tracker.set_expected_samples_1(samples_1);
 
     EXPECT_NO_THROW(parser.load());
 
     EXPECT_TRUE(callback_called);
-    EXPECT_EQ(g_tracker.sample_1_count, 1);
+    EXPECT_EQ(processor_ptr->get_sample_1_count(), 1);
     EXPECT_NE(std::remove(test_file_path.c_str()), 0);
 }
 
@@ -354,15 +351,17 @@ TEST_F(StorageParserTest, load_without_finished_callback)
 
     create_test_file_with_samples({}, samples_2, {});
 
+    auto processor = std::make_unique<sample_processor_t>();
+    processor->set_expected_samples_2(samples_2);
+    auto processor_ptr = processor.get();
+
     trace_cache::storage_parser<test_type_identifier_t, sample_processor_t, test_sample_1,
                                 test_sample_2, test_sample_3>
-        parser(test_file_path);
-
-    g_tracker.set_expected_samples_2(samples_2);
+        parser(test_file_path, std::move(processor));
 
     EXPECT_NO_THROW(parser.load());
 
-    EXPECT_EQ(g_tracker.sample_2_count, 1);
+    EXPECT_EQ(processor_ptr->get_sample_2_count(), 1);
     EXPECT_NE(std::remove(test_file_path.c_str()), 0);
 }
 
@@ -375,15 +374,17 @@ TEST_F(StorageParserTest, load_large_sample_data)
 
     create_test_file_with_samples({}, {}, samples_3);
 
+    auto processor = std::make_unique<sample_processor_t>();
+    processor->set_expected_samples_3(samples_3);
+    auto processor_ptr = processor.get();
+
     trace_cache::storage_parser<test_type_identifier_t, sample_processor_t, test_sample_1,
                                 test_sample_2, test_sample_3>
-        parser(test_file_path);
-
-    g_tracker.set_expected_samples_3(samples_3);
+        parser(test_file_path, std::move(processor));
 
     EXPECT_NO_THROW(parser.load());
 
-    EXPECT_EQ(g_tracker.sample_3_count, 1);
+    EXPECT_EQ(processor_ptr->get_sample_3_count(), 1);
 
     EXPECT_NE(std::remove(test_file_path.c_str()), 0);
 }
@@ -406,15 +407,17 @@ TEST_F(StorageParserTest, load_many_small_samples)
 
     create_test_file_with_samples(many_samples, {}, {});
 
+    auto processor = std::make_unique<sample_processor_t>();
+    processor->set_expected_samples_1(many_samples);
+    auto processor_ptr = processor.get();
+
     trace_cache::storage_parser<test_type_identifier_t, sample_processor_t, test_sample_1,
                                 test_sample_2, test_sample_3>
-        parser(test_file_path);
-
-    g_tracker.set_expected_samples_1(many_samples);
+        parser(test_file_path, std::move(processor));
 
     EXPECT_NO_THROW(parser.load());
 
-    EXPECT_EQ(g_tracker.sample_1_count, num_of_elements);
+    EXPECT_EQ(processor_ptr->get_sample_1_count(), num_of_elements);
     EXPECT_NE(std::remove(test_file_path.c_str()), 0);
 }
 
@@ -433,15 +436,18 @@ TEST_F(StorageParserTest, write_less_than_expected)
 
     ofs.close();
 
+    auto processor = std::make_unique<sample_processor_t>();
+    auto processor_ptr = processor.get();
+
     trace_cache::storage_parser<test_type_identifier_t, sample_processor_t, test_sample_1,
                                 test_sample_2, test_sample_3>
-        parser(test_file_path);
+        parser(test_file_path, std::move(processor));
 
     EXPECT_NO_THROW(parser.load());
 
-    EXPECT_EQ(g_tracker.sample_1_count, 0);
-    EXPECT_EQ(g_tracker.sample_2_count, 0);
-    EXPECT_EQ(g_tracker.sample_3_count, 0);
+    EXPECT_EQ(processor_ptr->get_sample_1_count(), 0);
+    EXPECT_EQ(processor_ptr->get_sample_2_count(), 0);
+    EXPECT_EQ(processor_ptr->get_sample_3_count(), 0);
 
     EXPECT_NE(std::remove(test_file_path.c_str()), 0);
 }
@@ -475,19 +481,21 @@ TEST_F(StorageParserTest, read_fragmented_space)
         ofs.close();
     }
 
+    auto processor = std::make_unique<sample_processor_t>();
+    processor->set_expected_samples_1(samples_1);
+    processor->set_expected_samples_2(samples_2);
+    processor->set_expected_samples_3(samples_3);
+    auto processor_ptr = processor.get();
+
     trace_cache::storage_parser<test_type_identifier_t, sample_processor_t, test_sample_1,
                                 test_sample_2, test_sample_3>
-        parser(test_file_path);
-
-    g_tracker.set_expected_samples_1(samples_1);
-    g_tracker.set_expected_samples_2(samples_2);
-    g_tracker.set_expected_samples_3(samples_3);
+        parser(test_file_path, std::move(processor));
 
     EXPECT_NO_THROW(parser.load());
 
-    EXPECT_EQ(g_tracker.sample_1_count, 1);
-    EXPECT_EQ(g_tracker.sample_2_count, 2);
-    EXPECT_EQ(g_tracker.sample_3_count, 1);
+    EXPECT_EQ(processor_ptr->get_sample_1_count(), 1);
+    EXPECT_EQ(processor_ptr->get_sample_2_count(), 2);
+    EXPECT_EQ(processor_ptr->get_sample_3_count(), 1);
 
     EXPECT_NE(std::remove(test_file_path.c_str()), 0);
 }

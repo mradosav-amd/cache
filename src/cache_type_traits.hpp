@@ -133,9 +133,9 @@ struct has_execute_processing : std::false_type
 template <typename T, typename TypeIdentifierEnum, typename CacheableType>
 struct has_execute_processing<
     T, TypeIdentifierEnum, CacheableType,
-    void_t<decltype(T::execute_sample_processing(std::declval<TypeIdentifierEnum>(),
-                                                 std::declval<const CacheableType&>()))>>
-: std::bool_constant<std::is_void_v<decltype(T::execute_sample_processing(
+    void_t<decltype(std::declval<T>().execute_sample_processing(
+        std::declval<TypeIdentifierEnum>(), std::declval<const CacheableType&>()))>>
+: std::bool_constant<std::is_void_v<decltype(std::declval<T>().execute_sample_processing(
       std::declval<TypeIdentifierEnum>(), std::declval<const CacheableType&>()))>>
 {};
 

@@ -1,7 +1,6 @@
 #include "src/cache_storage.hpp"
 #include "src/cacheable.hpp"
 #include "src/storage_parser.hpp"
-#include <memory>
 #include <string>
 #include <unistd.h>
 
@@ -211,18 +210,18 @@ private:
 
 struct type_processing_t
 {
-    static void clear_formats() { s_enabled_formats.clear(); }
+    void clear_formats() { m_enabled_formats.clear(); }
 
     template <typename T>
-    static void add_format(T& format)
+    void add_format(T& format)
     {
-        s_enabled_formats.emplace_back(format);
+        m_enabled_formats.emplace_back(format);
     }
 
-    static void execute_sample_processing(type_identifier_t               type_identifier,
-                                          const trace_cache::cacheable_t& value)
+    void execute_sample_processing(type_identifier_t               type_identifier,
+                                    const trace_cache::cacheable_t& value)
     {
-        for(const auto& handler : s_enabled_formats)
+        for(const auto& handler : m_enabled_formats)
         {
             switch(type_identifier)
             {
@@ -242,10 +241,8 @@ struct type_processing_t
     }
 
 private:
-    static std::vector<handler_view> s_enabled_formats;
+    std::vector<handler_view> m_enabled_formats;
 };
-
-std::vector<handler_view> type_processing_t::s_enabled_formats{};
 
 // ---------------- Example ----------------
 
@@ -258,9 +255,8 @@ run_multithread_example()
     threads.reserve(2);
 
     rocpd_format_handler_t rocpd_handler;
-    type_processing_t::add_format(rocpd_handler);
 
-    threads.push_back(std::thread([]() {
+    threads.push_back(std::thread([&rocpd_handler]() {
         auto filepath = trace_cache::utility::get_buffered_storage_filename(0, 0);
         trace_cache::buffered_storage<trace_cache::flush_worker_factory_t,
                                       type_identifier_t>
@@ -286,14 +282,17 @@ run_multithread_example()
 
         buffered_storage.shutdown();
 
+        std::unique_ptr<type_processing_t> processor = std::make_unique<type_processing_t>();
+        processor->add_format(rocpd_handler);
+
         trace_cache::storage_parser<type_identifier_t, type_processing_t, track_sample,
                                     process_sample>
-            parser(filepath);
+            parser(filepath, std::move(processor));
 
         parser.load();
     }));
 
-    threads.push_back(std::thread([]() {
+    threads.push_back(std::thread([&rocpd_handler]() {
         auto filepath = trace_cache::utility::get_buffered_storage_filename(1, 1);
         trace_cache::buffered_storage<trace_cache::flush_worker_factory_t,
                                       type_identifier_t>
@@ -308,9 +307,12 @@ run_multithread_example()
             count++;
         } while(count != number_of_iterations);
 
+        std::unique_ptr<type_processing_t> processor = std::make_unique<type_processing_t>();
+        processor->add_format(rocpd_handler);
+
         trace_cache::storage_parser<type_identifier_t, type_processing_t, track_sample,
                                     process_sample>
-            parser(filepath);
+            parser(filepath, std::move(processor));
 
         parser.load();
     }));
