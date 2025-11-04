@@ -266,23 +266,21 @@ private:
         m_head = 0;
     }
 
-    uint8_t* reserve_memory_space(const size_t& number_of_bytes)
+    __attribute__((always_inline)) inline uint8_t* reserve_memory_space(const size_t& number_of_bytes)
     {
         size_t _size;
         {
             std::lock_guard scope{ m_mutex };
 
-            if((m_head + number_of_bytes + header_size<TypeIdentifierEnum>) > buffer_size)
+            if(__builtin_expect((m_head + number_of_bytes + header_size<TypeIdentifierEnum>) > buffer_size, 0))
             {
                 fragment_memory();
             }
             _size  = m_head;
-            m_head = m_head + number_of_bytes;
+            m_head += number_of_bytes;
         }
 
-        auto* _result = m_buffer->data() + _size;
-        memset(_result, 0, number_of_bytes);
-        return _result;
+        return m_buffer->data() + _size;
     }
 
     bool is_running() const { return m_worker_synchronization->is_running; }

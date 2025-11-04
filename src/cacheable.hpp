@@ -39,75 +39,67 @@ const auto get_buffered_storage_filename = [](const int& ppid, const int& pid) {
 // helper functions
 
 template <typename Type>
-inline void
-check_is_type_supported()
-{
-    constexpr bool is_supported_type = type_traits::supported_types::is_supported<Type>;
-    static_assert(is_supported_type,
-                  "Supported types are std::string_view"
-                  "unsigned long, unsigned int, long, unsigned "
-                  "char, std::vector<unsigned char>, double, and int.");
-}
-
-template <typename Type>
-constexpr size_t
+__attribute__((always_inline)) inline constexpr size_t
 get_size_helper(Type&& val)
 {
-    check_is_type_supported<Type>();
+    using DecayedType = std::decay_t<Type>;
+    static_assert(type_traits::supported_types::is_supported<DecayedType>,
+                  "Unsupported type in get_size_helper");
 
-    if constexpr(type_traits::is_string_view_v<Type> ||
-                 std::is_same_v<std::decay_t<Type>, std::vector<uint8_t>>)
+    if constexpr(type_traits::is_string_view_v<DecayedType> ||
+                 std::is_same_v<DecayedType, std::vector<uint8_t>>)
     {
         return val.size() + sizeof(size_t);
     }
     else
     {
-        return sizeof(Type);
+        return sizeof(DecayedType);
     }
 }
 
 template <typename Type>
-void
+__attribute__((always_inline)) inline void
 store_value(const Type& value, uint8_t* buffer, size_t& position)
 {
-    check_is_type_supported<Type>();
+    using DecayedType = std::decay_t<Type>;
+    static_assert(type_traits::supported_types::is_supported<DecayedType>,
+                  "Unsupported type in store_value");
 
-    size_t len  = 0;
-    auto*  dest = buffer + position;
-    if constexpr(type_traits::is_string_view_v<Type> ||
-                 std::is_same_v<std::decay_t<Type>, std::vector<uint8_t>>)
+    auto* dest = buffer + position;
+
+    if constexpr(type_traits::is_string_view_v<DecayedType> ||
+                 std::is_same_v<DecayedType, std::vector<uint8_t>>)
     {
-        size_t elem_count = value.size();
-        len               = elem_count + sizeof(size_t);
-        std::memcpy(dest, &elem_count, sizeof(size_t));
-        std::memcpy(dest + sizeof(size_t), value.data(), value.size());
+        const size_t elem_count = value.size();
+        *reinterpret_cast<size_t*>(dest) = elem_count;
+        std::memcpy(dest + sizeof(size_t), value.data(), elem_count);
+        position += elem_count + sizeof(size_t);
     }
     else
     {
-        using ClearType                     = std::decay_t<decltype(value)>;
-        len                                 = sizeof(ClearType);
-        *reinterpret_cast<ClearType*>(dest) = value;
+        *reinterpret_cast<DecayedType*>(dest) = value;
+        position += sizeof(DecayedType);
     }
-    position += len;
 };
 
 template <typename Type>
-static void
+__attribute__((always_inline)) inline static void
 parse_value(Type& arg, uint8_t*& data_pos)
 {
-    check_is_type_supported<Type>();
+    using DecayedType = std::decay_t<Type>;
+    static_assert(type_traits::supported_types::is_supported<DecayedType>,
+                  "Unsupported type in parse_value");
 
-    if constexpr(type_traits::is_string_view_v<Type>)
+    if constexpr(type_traits::is_string_view_v<DecayedType>)
     {
-        size_t string_size = *reinterpret_cast<const size_t*>(data_pos);
+        const size_t string_size = *reinterpret_cast<const size_t*>(data_pos);
         data_pos += sizeof(size_t);
-
-        arg = std::string_view{ (const char*) data_pos, string_size };
+        arg = std::string_view{ reinterpret_cast<const char*>(data_pos), string_size };
         data_pos += string_size;
     }
-    else if constexpr(std::is_same_v<Type, std::vector<uint8_t>>)
+    else if constexpr(std::is_same_v<DecayedType, std::vector<uint8_t>>)
     {
-        size_t vector_size = *reinterpret_cast<const size_t*>(data_pos);
+        const size_t vector_size = *reinterpret_cast<const size_t*>(data_pos);
         data_pos += sizeof(size_t);
         arg.reserve(vector_size);
         std::copy_n(data_pos, vector_size, std::back_inserter(arg));
@@ -115,8 +107,8 @@ parse_value(Type& arg, uint8_t*& data_pos)
     }
     else
     {
-        arg = *reinterpret_cast<const Type*>(data_pos);
-        data_pos += sizeof(Type);
+        arg = *reinterpret_cast<const DecayedType*>(data_pos);
+        data_pos += sizeof(DecayedType);
     }
 }
 
